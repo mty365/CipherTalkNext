@@ -6,6 +6,7 @@ import {
   Card,
   CardContent,
   CardHeader,
+  Checkbox,
   Chip,
   Container,
   Snackbar,
@@ -29,6 +30,8 @@ type McpLaunchConfig = {
   cwd: string
   mode: 'dev' | 'packaged'
 }
+
+type McpSection = 'mcp' | 'skill'
 
 function formatCommandPart(value: string) {
   if (!value) return value
@@ -91,13 +94,67 @@ const secondaryButtonSx = {
   },
 }
 
+const getChipSx = (tone: 'primary' | 'success' | 'warning' | 'neutral' = 'neutral') => {
+  if (tone === 'primary') {
+    return {
+      borderRadius: '999px',
+      border: '1px solid var(--primary)',
+      color: 'var(--primary)',
+      backgroundColor: 'var(--primary-light)',
+      fontWeight: 700,
+      '& .MuiChip-label': {
+        px: 1.1,
+      },
+    }
+  }
+
+  if (tone === 'success') {
+    return {
+      borderRadius: '999px',
+      border: '1px solid rgba(76, 175, 80, 0.28)',
+      color: '#4CAF50',
+      backgroundColor: 'rgba(76, 175, 80, 0.1)',
+      fontWeight: 700,
+      '& .MuiChip-label': {
+        px: 1.1,
+      },
+    }
+  }
+
+  if (tone === 'warning') {
+    return {
+      borderRadius: '999px',
+      border: '1px solid rgba(245, 158, 11, 0.28)',
+      color: '#f59e0b',
+      backgroundColor: 'rgba(245, 158, 11, 0.12)',
+      fontWeight: 700,
+      '& .MuiChip-label': {
+        px: 1.1,
+      },
+    }
+  }
+
+  return {
+    borderRadius: '999px',
+    border: '1px solid var(--border-color)',
+    color: 'var(--text-secondary)',
+    backgroundColor: 'var(--bg-secondary)',
+    fontWeight: 700,
+    '& .MuiChip-label': {
+      px: 1.1,
+    },
+  }
+}
+
 function McpPage() {
   const managedSkillName = 'ct-mcp-copilot'
+  const [activeSection, setActiveSection] = useState<McpSection>('mcp')
   const [mcpEnabled, setMcpEnabled] = useState(false)
   const [mcpExposeMediaPaths, setMcpExposeMediaPaths] = useState(true)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [skillTargets, setSkillTargets] = useState<SkillInstallTarget[]>([])
+  const [selectedSkillDirs, setSelectedSkillDirs] = useState<string[]>([])
   const [detectingSkills, setDetectingSkills] = useState(false)
   const [installingSkill, setInstallingSkill] = useState(false)
   const [exportingSkillZip, setExportingSkillZip] = useState(false)
@@ -134,6 +191,7 @@ function McpPage() {
         try {
           const targets = await window.electronAPI.skillInstaller.detectTargets(managedSkillName)
           setSkillTargets(targets)
+          setSelectedSkillDirs(targets.filter((item) => item.supported && (!item.installed || item.updateAvailable)).map((item) => item.skillsDir))
         } catch (innerError) {
           console.error('检测 Skills 安装目标失败:', innerError)
         }
@@ -193,6 +251,7 @@ function McpPage() {
     try {
       const targets = await window.electronAPI.skillInstaller.detectTargets(managedSkillName)
       setSkillTargets(targets)
+      setSelectedSkillDirs(targets.filter((item) => item.supported && (!item.installed || item.updateAvailable)).map((item) => item.skillsDir))
       setToast({ text: '已刷新 Skills 安装目标', success: true })
     } catch (e) {
       console.error('检测 Skills 安装目标失败:', e)
@@ -203,12 +262,17 @@ function McpPage() {
   }
 
   const installManagedSkill = async () => {
+    if (selectedSkillDirs.length === 0) {
+      setToast({ text: '请先勾选要安装的 Agent 目标', success: false })
+      return
+    }
     setInstallingSkill(true)
     try {
-      const result = await window.electronAPI.skillInstaller.installSkill(managedSkillName)
+      const result = await window.electronAPI.skillInstaller.installSkill(managedSkillName, selectedSkillDirs)
       setSkillTargets(result.results)
+      setSelectedSkillDirs(result.results.filter((item) => item.supported && (!item.installed || item.updateAvailable)).map((item) => item.skillsDir))
       if (result.success) {
-        setToast({ text: `${managedSkillName} 已安装到支持的 Agent`, success: true })
+        setToast({ text: `${managedSkillName} 已安装到选中的 Agent`, success: true })
       } else {
         setToast({ text: result.error || 'Skill 安装失败', success: false })
       }
@@ -238,20 +302,61 @@ function McpPage() {
   }
 
   const bundledSkillVersion = skillTargets[0]?.bundledVersion || '1.0.0'
+  const selectableTargets = skillTargets.filter((item) => item.supported)
+  const allSelectableChecked = selectableTargets.length > 0 && selectableTargets.every((item) => selectedSkillDirs.includes(item.skillsDir))
+
+  const toggleSkillDir = (skillsDir: string, checked: boolean) => {
+    setSelectedSkillDirs((current) => checked
+      ? Array.from(new Set([...current, skillsDir]))
+      : current.filter((item) => item !== skillsDir))
+  }
 
   return (
     <Box sx={{ height: '100%', mx: -3, mt: -3, overflowY: 'auto', pb: 3 }}>
       <Container maxWidth="lg" sx={{ px: { xs: 2, md: 4 }, py: { xs: 3, md: 4 } }}>
         <Stack spacing={2.2}>
-        <Box sx={{ px: { xs: 0.5, md: 1 }, pt: 0.5 }}>
-          <Typography variant="h4" sx={{ fontSize: 30, fontWeight: 700, color: 'var(--text-primary)' }}>
-            MCP Server
-          </Typography>
-          <Typography sx={{ mt: 1, color: 'var(--text-secondary)' }}>
-            使用标准 MCP `stdio` 工具接口为 Claude Desktop、Codex、Cherry Studio 等宿主提供本地聊天数据读取能力。
-          </Typography>
-        </Box>
+          <Stack direction="row" spacing={1} sx={{ px: { xs: 0.5, md: 1 }, pt: 0.5 }}>
+            <Button
+              variant={activeSection === 'mcp' ? 'contained' : 'outlined'}
+              onClick={() => setActiveSection('mcp')}
+              sx={activeSection === 'mcp'
+                ? {
+                    borderRadius: '999px',
+                    textTransform: 'none',
+                    fontWeight: 700,
+                    minWidth: 88,
+                    background: 'var(--primary-gradient)',
+                    '&:hover': {
+                      background: 'var(--primary-gradient)',
+                      filter: 'brightness(0.98)',
+                    },
+                  }
+                : secondaryButtonSx}
+            >
+              MCP
+            </Button>
+            <Button
+              variant={activeSection === 'skill' ? 'contained' : 'outlined'}
+              onClick={() => setActiveSection('skill')}
+              sx={activeSection === 'skill'
+                ? {
+                    borderRadius: '999px',
+                    textTransform: 'none',
+                    fontWeight: 700,
+                    minWidth: 88,
+                    background: 'var(--primary-gradient)',
+                    '&:hover': {
+                      background: 'var(--primary-gradient)',
+                      filter: 'brightness(0.98)',
+                    },
+                  }
+                : secondaryButtonSx}
+            >
+              Skill
+            </Button>
+          </Stack>
 
+        {activeSection === 'mcp' && (
         <Card
           sx={{
             borderRadius: '26px',
@@ -427,7 +532,9 @@ function McpPage() {
             </Stack>
           </CardContent>
         </Card>
+        )}
 
+        {activeSection === 'skill' && (
         <Card
           sx={{
             borderRadius: '26px',
@@ -525,9 +632,27 @@ function McpPage() {
                         },
                       }}
                     >
-                      {installingSkill ? '安装中...' : '一键安装'}
+                      {installingSkill ? '安装中...' : '安装选中'}
                     </Button>
                   </Stack>
+                </Stack>
+                <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                  <Button
+                    variant="outlined"
+                    onClick={() => setSelectedSkillDirs(selectableTargets.map((item) => item.skillsDir))}
+                    disabled={selectableTargets.length === 0}
+                    sx={secondaryButtonSx}
+                  >
+                    全选
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    onClick={() => setSelectedSkillDirs([])}
+                    disabled={selectedSkillDirs.length === 0}
+                    sx={secondaryButtonSx}
+                  >
+                    清空选择
+                  </Button>
                 </Stack>
               </Box>
 
@@ -545,27 +670,42 @@ function McpPage() {
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} justifyContent="space-between" alignItems={{ xs: 'flex-start', sm: 'center' }}>
                       <Box sx={{ minWidth: 0 }}>
                         <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap">
+                          <Checkbox
+                            checked={selectedSkillDirs.includes(target.skillsDir)}
+                            indeterminate={false}
+                            disabled={!target.supported}
+                            onChange={(event) => toggleSkillDir(target.skillsDir, event.target.checked)}
+                            sx={{
+                              color: 'var(--text-tertiary)',
+                              '&.Mui-checked': {
+                                color: 'var(--primary)',
+                              },
+                              p: 0.5,
+                              mr: 0.5,
+                            }}
+                          />
                           <Typography sx={{ fontWeight: 600, color: 'var(--text-primary)' }}>
                             {target.agentLabel}
                           </Typography>
                           <Chip
                             label={target.installed ? '已安装' : target.supported ? '可安装' : '不支持'}
                             size="small"
-                            color={target.installed ? 'success' : target.supported ? 'primary' : 'default'}
                             variant="outlined"
+                            sx={target.installed ? getChipSx('success') : target.supported ? getChipSx('primary') : getChipSx('neutral')}
                           />
                           {target.updateAvailable && (
                             <Chip
                               label="可更新"
                               size="small"
-                              color="warning"
                               variant="outlined"
+                              sx={getChipSx('warning')}
                             />
                           )}
                           <Chip
                             label={target.source === 'known' ? '内置规则' : '扫描发现'}
                             size="small"
                             variant="outlined"
+                            sx={getChipSx('neutral')}
                           />
                         </Stack>
                         <Typography sx={{ mt: 0.75, fontSize: 13, color: 'var(--text-secondary)', wordBreak: 'break-all' }}>
@@ -596,6 +736,7 @@ function McpPage() {
             </Stack>
           </CardContent>
         </Card>
+        )}
         </Stack>
       </Container>
 

@@ -48,8 +48,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   skillInstaller: {
     detectTargets: (skillName: string) => ipcRenderer.invoke('skillInstaller:detectTargets', skillName) as Promise<SkillInstallTarget[]>,
-    installSkill: (skillName: string) =>
-      ipcRenderer.invoke('skillInstaller:installSkill', skillName) as Promise<{ success: boolean; results: SkillInstallTarget[]; error?: string }>,
+    installSkill: (skillName: string, selectedSkillsDirs?: string[]) =>
+      ipcRenderer.invoke('skillInstaller:installSkill', skillName, selectedSkillsDirs) as Promise<{ success: boolean; results: SkillInstallTarget[]; error?: string }>,
     exportSkillZip: (skillName: string) =>
       ipcRenderer.invoke('skillInstaller:exportSkillZip', skillName) as Promise<{ success: boolean; outputPath?: string; fileName?: string; version?: string; error?: string }>
   },

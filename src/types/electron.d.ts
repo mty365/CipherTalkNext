@@ -82,7 +82,7 @@ export interface ElectronAPI {
   }
   skillInstaller: {
     detectTargets: (skillName: string) => Promise<SkillInstallTarget[]>
-    installSkill: (skillName: string) => Promise<{ success: boolean; results: SkillInstallTarget[]; error?: string }>
+    installSkill: (skillName: string, selectedSkillsDirs?: string[]) => Promise<{ success: boolean; results: SkillInstallTarget[]; error?: string }>
     exportSkillZip: (skillName: string) => Promise<{ success: boolean; outputPath?: string; fileName?: string; version?: string; error?: string }>
   }
   db: {

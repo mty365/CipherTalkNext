@@ -47,7 +47,12 @@ function getKnownAgentTargets(): Array<{ agentKind: SupportedAgentKind; agentLab
   if (!home) return []
   return [
     { agentKind: 'codex', agentLabel: 'Codex', skillsDir: join(home, '.codex', 'skills'), source: 'known' },
-    { agentKind: 'agents', agentLabel: '.agents', skillsDir: join(home, '.agents', 'skills'), source: 'known' }
+    { agentKind: 'codex', agentLabel: 'Claude', skillsDir: join(home, '.claude', 'skills'), source: 'known' },
+    { agentKind: 'agents', agentLabel: '.agents', skillsDir: join(home, '.agents', 'skills'), source: 'known' },
+    { agentKind: 'agents', agentLabel: 'Cursor', skillsDir: join(home, '.cursor', 'skills'), source: 'known' },
+    { agentKind: 'agents', agentLabel: 'Kiro', skillsDir: join(home, '.kiro', 'skills'), source: 'known' },
+    { agentKind: 'agents', agentLabel: 'Trae', skillsDir: join(home, '.trae', 'skills'), source: 'known' },
+    { agentKind: 'agents', agentLabel: 'Trae-CN', skillsDir: join(home, '.trae-cn', 'skills'), source: 'known' }
   ]
 }
 
@@ -102,12 +107,20 @@ export class SkillInstallerService {
       if (normalized.includes(projectRoot)) return
 
       const parentHint = dirname(candidate).toLowerCase()
-      if (!/(codex|agent|agents|claude)/.test(parentHint)) return
+      if (!/(codex|agent|agents|claude|cursor|kiro|trae)/.test(parentHint)) return
 
       seen.add(normalized)
       results.push({
         agentKind: /codex/.test(parentHint) ? 'codex' : 'agents',
-        agentLabel: parentHint.includes('claude') ? '发现的 Claude/Agent Skills' : '发现的 Skills 目录',
+        agentLabel: parentHint.includes('cursor')
+          ? '发现的 Cursor Skills'
+          : parentHint.includes('kiro')
+            ? '发现的 Kiro Skills'
+            : parentHint.includes('trae')
+              ? '发现的 Trae Skills'
+              : parentHint.includes('claude')
+                ? '发现的 Claude/Agent Skills'
+                : '发现的 Skills 目录',
         skillsDir: candidate,
         source: 'discovered'
       })
@@ -118,11 +131,6 @@ export class SkillInstallerService {
         if (!entry.isDirectory() || !entry.name.startsWith('.')) continue
         const levelOne = join(home, entry.name)
         addIfMatch(join(levelOne, 'skills'))
-
-        for (const nested of readdirSync(levelOne, { withFileTypes: true })) {
-          if (!nested.isDirectory()) continue
-          addIfMatch(join(levelOne, nested.name, 'skills'))
-        }
       }
     } catch {
       // ignore scan errors
@@ -160,7 +168,7 @@ export class SkillInstallerService {
     })
   }
 
-  installSkill(skillName: string): { success: boolean; results: SkillInstallTarget[]; error?: string } {
+  installSkill(skillName: string, selectedSkillsDirs?: string[]): { success: boolean; results: SkillInstallTarget[]; error?: string } {
     const sourcePath = this.getSkillSourcePath(skillName)
     if (!sourcePath || !existsSync(join(sourcePath, 'SKILL.md'))) {
       return {
@@ -170,7 +178,15 @@ export class SkillInstallerService {
       }
     }
 
+    const selectedSet = selectedSkillsDirs?.length
+      ? new Set(selectedSkillsDirs.map((item) => item.toLowerCase()))
+      : null
+
     const results = this.detectTargets(skillName).map((target) => {
+      if (selectedSet && !selectedSet.has(target.skillsDir.toLowerCase())) {
+        return target
+      }
+
       if (!target.supported || !target.installPath) {
         return {
           ...target,
