@@ -834,7 +834,22 @@ export class AIDatabase {
     console.log('[AIDatabase] 查询历史记录:', { sessionId, limit })
 
     const rows = db.prepare(`
-      SELECT * FROM summaries
+      SELECT
+        id,
+        session_id,
+        time_range_start,
+        time_range_end,
+        time_range_days,
+        message_count,
+        summary_text,
+        tokens_used,
+        cost,
+        provider,
+        model,
+        created_at,
+        custom_name,
+        structured_result_json
+      FROM summaries
       WHERE session_id = ?
       ORDER BY created_at DESC
       LIMIT ?
@@ -855,7 +870,6 @@ export class AIDatabase {
       provider: row.provider,
       model: row.model,
       createdAt: row.created_at,
-      promptText: row.prompt_text,
       customName: row.custom_name,
       structuredAnalysis: this.parseStructuredAnalysisColumn(row.structured_result_json)
     }))

@@ -43,7 +43,6 @@ import {
   type SessionQAToolCall
 } from '../ai-agent/qa/sessionQaAgent'
 import { hashMemoryContent, memoryDatabase } from '../memory/memoryDatabase'
-import { memoryBuildService } from '../memory/memoryBuildService'
 import { memoryProfileService } from '../memory/memoryProfileService'
 import type { SessionProfileMemoryState } from '../memory/memoryProfileService'
 import type { MemoryEvidenceRef, MemoryItem, MemoryItemInput, MemorySourceType } from '../memory/memorySchema'
@@ -513,14 +512,6 @@ ${detailInstructions[detail as keyof typeof detailInstructions] || detailInstruc
     }).slice(0, 30)
   }
 
-  private async refreshSummaryMemories(sessionId: string): Promise<void> {
-    try {
-      await memoryBuildService.prepareSessionMemory(sessionId)
-    } catch (error) {
-      console.warn('[AIService] 摘要后同步 memory_items 失败:', error)
-    }
-  }
-
   private async tryGenerateStructuredAnalysis(
     provider: AIProvider,
     model: string,
@@ -737,7 +728,6 @@ ${detailInstructions[detail as keyof typeof detailInstructions] || detailInstruc
         summaryText,
         structuredAnalysis: structuredAnalysisResult?.finalAnalysis
       }))
-      void this.refreshSummaryMemories(options.sessionId)
     } catch (error) {
       console.warn('[AIService] 摘要记忆写入失败:', error)
     }

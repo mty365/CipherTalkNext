@@ -2191,7 +2191,7 @@ function AISummaryWindow() {
     try {
       const result = await window.electronAPI.ai.getSummaryHistory(sid, 10)
       if (result.success && result.history) {
-        console.log('[AISummaryWindow] 历史记录:', result.history)
+        console.log('[AISummaryWindow] 历史记录数量:', result.history.length)
         setHistory(result.history)
       }
     } catch (e) {

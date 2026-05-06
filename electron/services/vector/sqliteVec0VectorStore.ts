@@ -13,8 +13,33 @@ type SqliteVecModule = {
   getLoadablePath?: () => string
 }
 
+export type SqliteVecLoadResult = {
+  available: boolean
+  error?: string
+}
+
+const loadedDatabases = new WeakSet<Database.Database>()
+
 function resolveLoadableExtensionPath(loadablePath: string): string {
   return loadablePath.replace(/app\.asar(?=[\\/])/, 'app.asar.unpacked')
+}
+
+export function loadSqliteVecExtension(db: Database.Database): SqliteVecLoadResult {
+  if (loadedDatabases.has(db)) return { available: true }
+
+  try {
+    const sqliteVec = require('sqlite-vec') as SqliteVecModule
+    const loadablePath = sqliteVec.getLoadablePath?.()
+    if (loadablePath) {
+      db.loadExtension(resolveLoadableExtensionPath(loadablePath))
+    } else {
+      sqliteVec.load(db)
+    }
+    loadedDatabases.add(db)
+    return { available: true }
+  } catch (error) {
+    return { available: false, error: String(error) }
+  }
 }
 
 export class SqliteVec0VectorStore implements VectorStore {
@@ -24,20 +49,11 @@ export class SqliteVec0VectorStore implements VectorStore {
   private error = ''
 
   load(db: Database.Database): void {
-    try {
-      const sqliteVec = require('sqlite-vec') as SqliteVecModule
-      const loadablePath = sqliteVec.getLoadablePath?.()
-      if (loadablePath) {
-        db.loadExtension(resolveLoadableExtensionPath(loadablePath))
-      } else {
-        sqliteVec.load(db)
-      }
-      this.available = true
-      this.error = ''
-    } catch (error) {
-      this.available = false
-      this.error = String(error)
-      console.warn('[VectorStore:sqlite_vec0] sqlite-vec 加载失败，语义向量检索将降级为关键词检索:', error)
+    const result = loadSqliteVecExtension(db)
+    this.available = result.available
+    this.error = result.error || ''
+    if (!result.available) {
+      console.warn('[VectorStore:sqlite_vec0] sqlite-vec 加载失败，语义向量检索将降级为关键词检索:', result.error)
     }
   }
 

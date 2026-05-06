@@ -10,8 +10,9 @@ import type {
   AgentSearchResult,
   AgentVectorDiagnostics
 } from './models'
-import { agentEmbeddingRuntime } from './embeddingRuntime'
 import { agentDataRepository, buildAgentFtsQuery } from './repository'
+import { embeddingRuntimeService } from '../../../search/embeddingRuntimeService'
+import { loadSqliteVecExtension } from '../../../vector/sqliteVec0VectorStore'
 
 type IndexRow = {
   id: number
@@ -108,6 +109,10 @@ function sessionKey(sessionId: string): number {
   return hash >>> 0
 }
 
+function float32ArrayToBuffer(vector: Float32Array): Buffer {
+  return Buffer.from(vector.buffer.slice(vector.byteOffset, vector.byteOffset + vector.byteLength))
+}
+
 function scoreByRank(rank: number, base: number): number {
   return Number((base + 1 / (60 + Math.max(1, rank))).toFixed(6))
 }
@@ -185,16 +190,6 @@ function buildIndexFilters(input: SearchInput, params: Record<string, unknown>):
     params.senderUsername = input.senderUsername.toLowerCase()
   }
   return filters
-}
-
-function loadSqliteVec(db: Database.Database): { available: boolean; error?: string } {
-  try {
-    const sqliteVec = require('sqlite-vec') as { load: (database: Database.Database) => void }
-    sqliteVec.load(db)
-    return { available: true }
-  } catch (error) {
-    return { available: false, error: String(error) }
-  }
 }
 
 function memoryFilterSql(input: SearchInput, params: Record<string, unknown>): string {
@@ -480,15 +475,16 @@ export class AgentRetriever {
   }
 
   private async searchVector(db: Database.Database, input: SearchInput, displayNameMap: Map<string, string>): Promise<{ hits: AgentSearchHit[]; diagnostics: string[]; vectorSearch: AgentVectorDiagnostics }> {
-    const vectorLoad = loadSqliteVec(db)
+    const vectorLoad = loadSqliteVecExtension(db)
     const diagnostics: string[] = []
-    const profile = agentEmbeddingRuntime.getCurrentProfile()
-    const vectorModel = agentEmbeddingRuntime.getVectorModelId(profile)
+    const profile = embeddingRuntimeService.getCurrentProfile()
+    const vectorModel = embeddingRuntimeService.getCurrentVectorModelId()
     const state = this.getVectorState(db, input.sessionId, vectorModel)
+    const runtimeAvailable = vectorLoad.available && (profile.mode !== 'online' || profile.enabled !== false)
     const vectorSearch: AgentVectorDiagnostics = {
       requested: true,
       attempted: false,
-      providerAvailable: vectorLoad.available,
+      providerAvailable: runtimeAvailable,
       indexComplete: Boolean(state?.isComplete),
       hitCount: 0,
       indexedMessages: state?.indexedCount || 0,
@@ -501,6 +497,11 @@ export class AgentRetriever {
       vectorSearch.error = vectorLoad.error
       return { hits: [], diagnostics: [`语义搜索：向量扩展不可用，${compactText(vectorLoad.error || '', 120)}`], vectorSearch }
     }
+    if (!runtimeAvailable) {
+      vectorSearch.skippedReason = 'vector_provider_unavailable'
+      vectorSearch.error = profile.mode === 'online' ? '未配置在线语义向量服务' : '语义向量服务不可用'
+      return { hits: [], diagnostics: [`语义搜索：向量能力不可用，${vectorSearch.error}`], vectorSearch }
+    }
     if (!state?.isComplete) {
       vectorSearch.skippedReason = 'vector_index_incomplete'
       return { hits: [], diagnostics: '语义搜索：当前会话向量索引未完成。'.split('\n'), vectorSearch }
@@ -508,7 +509,7 @@ export class AgentRetriever {
 
     try {
       const semanticQuery = input.semanticQuery || input.semanticQueries?.[0] || input.query
-      const { embedding } = await agentEmbeddingRuntime.embedQuery(semanticQuery)
+      const embedding = float32ArrayToBuffer(await embeddingRuntimeService.embedText(semanticQuery, { inputType: 'query' }))
       const scanLimit = Math.max((input.limit || 20) * VECTOR_OVERFETCH, (input.limit || 20) + 20)
       const vectorRows = db.prepare(`
         SELECT vector_id, distance
