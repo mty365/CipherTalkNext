@@ -7,7 +7,7 @@ interface RouteGuardProps {
 }
 
 // 不需要数据库连接的页面
-const PUBLIC_ROUTES = ['/', '/settings', '/data-management']
+const PUBLIC_ROUTES = ['/', '/settings', '/data-management', '/agent']
 
 function RouteGuard({ children }: RouteGuardProps) {
   const navigate = useNavigate()

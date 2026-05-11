@@ -25,6 +25,7 @@ import BrowserWindowPage from './pages/BrowserWindowPage'
 import SplashPage from './pages/SplashPage'
 import AISummaryWindow from './pages/AISummaryWindow'
 import ChatHistoryPage from './pages/ChatHistoryPage'
+import AgentPage from './pages/agent/AgentPage'
 import MomentsWindow from './pages/MomentsWindow'
 import { useAppStore } from './stores/appStore'
 import { useThemeStore } from './stores/themeStore'
@@ -729,6 +730,7 @@ function App() {
               <Route path="/open-api" element={<OpenApiPage />} />
               <Route path="/mcp" element={<McpPage />} />
               <Route path="/export" element={<ExportPage />} />
+              <Route path="/agent" element={<AgentPage />} />
               <Route path="/chat-history/:sessionId/:messageId" element={<ChatHistoryPage />} />
             </Routes>
           </RouteGuard>
