@@ -835,6 +835,9 @@ export interface ElectronAPI {
         systemEvents: Array<{ type: 'join' | 'leave' | 'other'; content: string; createTime: number }>
         firstSpeaker: { username: string; displayName: string; avatarUrl?: string } | null
         averageMessageLength: number
+        totalMessages: number
+        joinCount: number
+        leaveCount: number
         errors?: StatsPartialError[]
         partialFailureCount?: number
       }

@@ -28,6 +28,9 @@ interface GroupEvents {
   systemEvents: Array<{ type: 'join' | 'leave' | 'other'; content: string; createTime: number }>
   firstSpeaker: GroupMember | null
   averageMessageLength: number
+  totalMessages: number
+  joinCount: number
+  leaveCount: number
   partialFailureCount?: number
 }
 
@@ -209,9 +212,23 @@ function GroupAnalyticsPage() {
     }
   }
 
+  const formatEventTime = (ts: number) => {
+    const d = new Date(ts * 1000)
+    const now = Date.now()
+    const diff = now - d.getTime()
+    const days = Math.floor(diff / 86400000)
+    if (days === 0) return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    if (days === 1) return '昨天'
+    if (days < 30) return `${days}天前`
+    return d.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+  }
+
   const formatNumber = (num: number) => {
-    if (num >= 10000) return (num / 10000).toFixed(1) + '万'
-    return num.toLocaleString()
+    const value = Number(num || 0)
+    if (!Number.isFinite(value) || value < 0) return '0'
+    if (value >= 1e8) return (value / 1e8).toFixed(2) + '亿'
+    if (value >= 1e4) return (value / 1e4).toFixed(1) + '万'
+    return Math.round(value).toLocaleString()
   }
 
   const getHourlyOption = () => {
@@ -544,51 +561,191 @@ function GroupAnalyticsPage() {
                 </div>
               )}
               {selectedFunction === 'events' && groupEvents && (
-                <div className="media-stats">
-                  {!!groupEvents.partialFailureCount && <p>部分数据库读取失败（{groupEvents.partialFailureCount} 个分片）</p>}
-                  <div className="media-legend">
-                    <div className="legend-total">
-                      <span>首位发言人</span>
-                      <span>{groupEvents.firstSpeaker?.displayName || '暂无'}</span>
+                <div className="events-panel">
+                  {!!groupEvents.partialFailureCount && (
+                    <p className="partial-failure-hint">部分数据库读取失败（{groupEvents.partialFailureCount} 个分片）</p>
+                  )}
+                  <div className="kpi-grid">
+                    <div className="kpi-card">
+                      <span className="kpi-value">{formatNumber(groupEvents.totalMessages)}</span>
+                      <span className="kpi-label">总消息数</span>
                     </div>
-                    <div className="legend-total">
-                      <span>平均文本长度</span>
-                      <span>{groupEvents.averageMessageLength} 字</span>
+                    <div className="kpi-card kpi-accent-green">
+                      <span className="kpi-value">{groupEvents.joinCount}</span>
+                      <span className="kpi-label">成员入群</span>
                     </div>
-                    {groupEvents.mentions.slice(0, 10).map(item => (
-                      <div key={item.member.username} className="legend-item">
-                        <span className="legend-name">@{item.member.displayName}</span>
-                        <span className="legend-count">{formatNumber(item.count)} 次</span>
-                      </div>
-                    ))}
-                    {groupEvents.systemEvents.slice(-10).reverse().map((event, index) => (
-                      <div key={`${event.createTime}-${index}`} className="legend-item">
-                        <span className="legend-name">{event.type === 'join' ? '入群' : '退群'}</span>
-                        <span className="legend-count">{event.content}</span>
-                      </div>
-                    ))}
+                    <div className="kpi-card kpi-accent-red">
+                      <span className="kpi-value">{groupEvents.leaveCount}</span>
+                      <span className="kpi-label">成员退群</span>
+                    </div>
+                    <div className="kpi-card">
+                      <span className="kpi-value">{groupEvents.averageMessageLength}<small> 字</small></span>
+                      <span className="kpi-label">平均消息长度</span>
+                    </div>
                   </div>
+
+                  {groupEvents.firstSpeaker && (
+                    <div className="events-section">
+                      <h4 className="section-title">最早发言人</h4>
+                      <div className="first-speaker-card">
+                        <div className="first-speaker-avatar">
+                          {groupEvents.firstSpeaker.avatarUrl
+                            ? <img src={groupEvents.firstSpeaker.avatarUrl} alt="" />
+                            : <div className="avatar-placeholder"><User size={18} /></div>}
+                        </div>
+                        <span className="first-speaker-name">{groupEvents.firstSpeaker.displayName}</span>
+                        <span className="first-speaker-badge">首位</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {groupEvents.mentions.length > 0 && (
+                    <div className="events-section">
+                      <h4 className="section-title"><AtSign size={13} /> @提及排行</h4>
+                      <div className="mention-list">
+                        {groupEvents.mentions.slice(0, 10).map((item, index) => {
+                          const maxCount = groupEvents.mentions[0].count
+                          const width = maxCount > 0 ? (item.count / maxCount * 100).toFixed(0) : 0
+                          return (
+                            <div key={item.member.username} className="mention-item">
+                              <span className="mention-rank">{index + 1}</span>
+                              <div className="mention-avatar">
+                                {item.member.avatarUrl
+                                  ? <img src={item.member.avatarUrl} alt="" />
+                                  : <div className="avatar-placeholder"><User size={12} /></div>}
+                              </div>
+                              <span className="mention-name">{item.member.displayName}</span>
+                              <div className="mention-bar-wrap">
+                                <div className="mention-bar" style={{ width: `${width}%` }} />
+                              </div>
+                              <span className="mention-count">{formatNumber(item.count)} 次</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {groupEvents.systemEvents.length > 0 && (
+                    <div className="events-section">
+                      <h4 className="section-title">群成员动态</h4>
+                      <div className="timeline-list">
+                        {groupEvents.systemEvents.slice(-30).reverse().map((event, index) => (
+                          <div key={`${event.createTime}-${index}`} className={`timeline-item timeline-${event.type}`}>
+                            <div className={`timeline-dot dot-${event.type}`} />
+                            <span className="timeline-type">{event.type === 'join' ? '入群' : event.type === 'leave' ? '退群' : '系统'}</span>
+                            <span className="timeline-content">{event.content}</span>
+                            <span className="timeline-time">{formatEventTime(event.createTime)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {selectedFunction === 'breakdown' && messageBreakdown && (
-                <div className="media-stats">
-                  {!!messageBreakdown.partialFailureCount && <p>部分数据库读取失败（{messageBreakdown.partialFailureCount} 个分片）</p>}
-                  <div className="media-legend">
-                    <div className="legend-total">
-                      <span>首位发言人</span>
-                      <span>{messageBreakdown.firstSpeaker?.displayName || '暂无'}</span>
+                <div className="breakdown-panel">
+                  {!!messageBreakdown.partialFailureCount && (
+                    <p className="partial-failure-hint">部分数据库读取失败（{messageBreakdown.partialFailureCount} 个分片）</p>
+                  )}
+                  <div className="kpi-grid">
+                    <div className="kpi-card">
+                      <span className="kpi-value">{formatNumber(messageBreakdown.mediaStats.total)}</span>
+                      <span className="kpi-label">总消息数</span>
                     </div>
-                    <div className="legend-total">
-                      <span>平均文本长度</span>
-                      <span>{messageBreakdown.averageMessageLength} 字</span>
+                    <div className="kpi-card">
+                      <span className="kpi-value">
+                        {formatNumber(messageBreakdown.mediaStats.typeCounts.find(t => t.type === 1)?.count || 0)}
+                      </span>
+                      <span className="kpi-label">文本消息</span>
                     </div>
-                    {(messageBreakdown.mediaStats.appSubtypes || []).map(item => (
-                      <div key={item.type} className="legend-item">
-                        <span className="legend-name">{item.name}</span>
-                        <span className="legend-count">{formatNumber(item.count)} 条</span>
-                      </div>
-                    ))}
+                    <div className="kpi-card">
+                      <span className="kpi-value">
+                        {formatNumber(
+                          (messageBreakdown.mediaStats.typeCounts.find(t => t.type === 3)?.count || 0) +
+                          (messageBreakdown.mediaStats.typeCounts.find(t => t.type === 43)?.count || 0)
+                        )}
+                      </span>
+                      <span className="kpi-label">图片 / 视频</span>
+                    </div>
+                    <div className="kpi-card">
+                      <span className="kpi-value">{messageBreakdown.averageMessageLength}<small> 字</small></span>
+                      <span className="kpi-label">平均消息长度</span>
+                    </div>
                   </div>
+
+                  {messageBreakdown.mediaStats.typeCounts.length > 0 && (
+                    <div className="breakdown-section">
+                      <h4 className="section-title">消息类型分布</h4>
+                      <div className="bar-chart-list">
+                        {(() => {
+                          const colorMap: Record<number, string> = {
+                            1: '#3b82f6', 3: '#22c55e', 34: '#f97316',
+                            43: '#a855f7', 47: '#ec4899', 49: '#14b8a6', [-1]: '#6b7280'
+                          }
+                          const total = messageBreakdown.mediaStats.total
+                          const maxCount = messageBreakdown.mediaStats.typeCounts[0]?.count || 1
+                          return messageBreakdown.mediaStats.typeCounts.map(item => {
+                            const pct = total > 0 ? (item.count / total * 100).toFixed(1) : '0'
+                            const barWidth = (item.count / maxCount * 100).toFixed(0)
+                            const color = colorMap[item.type] || '#6b7280'
+                            return (
+                              <div key={item.type} className="bar-item">
+                                <span className="bar-label">{item.name}</span>
+                                <div className="bar-track">
+                                  <div className="bar-fill" style={{ width: `${barWidth}%`, background: color }} />
+                                </div>
+                                <span className="bar-pct">{pct}%</span>
+                                <span className="bar-count">{formatNumber(item.count)}</span>
+                              </div>
+                            )
+                          })
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
+                  {(messageBreakdown.mediaStats.appSubtypes || []).length > 0 && (
+                    <div className="breakdown-section">
+                      <h4 className="section-title">链接与应用细分</h4>
+                      <div className="bar-chart-list">
+                        {(() => {
+                          const subtypes = messageBreakdown.mediaStats.appSubtypes || []
+                          const maxCount = subtypes[0]?.count || 1
+                          return subtypes.map(item => {
+                            const total = subtypes.reduce((s, i) => s + i.count, 0)
+                            const pct = total > 0 ? (item.count / total * 100).toFixed(1) : '0'
+                            const barWidth = (item.count / maxCount * 100).toFixed(0)
+                            return (
+                              <div key={item.type} className="bar-item">
+                                <span className="bar-label">{item.name}</span>
+                                <div className="bar-track">
+                                  <div className="bar-fill" style={{ width: `${barWidth}%`, background: '#14b8a6' }} />
+                                </div>
+                                <span className="bar-pct">{pct}%</span>
+                                <span className="bar-count">{formatNumber(item.count)}</span>
+                              </div>
+                            )
+                          })
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
+                  {messageBreakdown.firstSpeaker && (
+                    <div className="breakdown-section">
+                      <h4 className="section-title">首位发言人</h4>
+                      <div className="first-speaker-card">
+                        <div className="first-speaker-avatar">
+                          {messageBreakdown.firstSpeaker.avatarUrl
+                            ? <img src={messageBreakdown.firstSpeaker.avatarUrl} alt="" />
+                            : <div className="avatar-placeholder"><User size={18} /></div>}
+                        </div>
+                        <span className="first-speaker-name">{messageBreakdown.firstSpeaker.displayName}</span>
+                        <span className="first-speaker-badge">首位</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </>

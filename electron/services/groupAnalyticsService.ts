@@ -59,6 +59,9 @@ export interface GroupEvents {
   systemEvents: GroupSystemEvent[]
   firstSpeaker: GroupMember | null
   averageMessageLength: number
+  totalMessages: number
+  joinCount: number
+  leaveCount: number
   errors?: StatsPartialError[]
   partialFailureCount?: number
 }
@@ -293,7 +296,8 @@ class GroupAnalyticsService {
         try {
           const senderCounts = await this.getSenderCounts(pair.dbPath, pair.tableName, range)
           for (const { sender, count } of senderCounts) {
-            if (sender) messageCounts.set(sender, (messageCounts.get(sender) || 0) + count)
+            const numericCount = Number(count || 0)
+            if (sender && numericCount > 0) messageCounts.set(sender, (messageCounts.get(sender) || 0) + numericCount)
           }
         } catch (e) {
           recordStatsError(errors, e, { dbPath: pair.dbPath, tableName: pair.tableName, prefix: '[GroupAnalyticsService]' })
@@ -388,7 +392,12 @@ class GroupAnalyticsService {
             where.params
           )
           for (const { local_type, count } of rows) {
-            typeCounts.set(local_type, (typeCounts.get(local_type) || 0) + count)
+            const numericType = Number(local_type)
+            const numericCount = Number(count || 0)
+            if (numericCount <= 0) continue
+            const canonicalType = (TEXT_LOCAL_TYPES as readonly number[]).includes(numericType) ? 1 : numericType
+            const bucketType = MAIN_MEDIA_TYPE_NAMES[canonicalType] ? canonicalType : -1
+            typeCounts.set(bucketType, (typeCounts.get(bucketType) || 0) + numericCount)
           }
 
           if (columns.contentColumn) {
@@ -416,7 +425,7 @@ class GroupAnalyticsService {
         .filter(([, count]) => count > 0)
         .map(([type, count]) => ({
           type,
-          name: MAIN_MEDIA_TYPE_NAMES[type] || '其他',
+          name: type === -1 ? '其他' : (MAIN_MEDIA_TYPE_NAMES[type] || '其他'),
           count
         }))
         .sort((a, b) => b.count - a.count)
@@ -490,11 +499,21 @@ class GroupAnalyticsService {
       const systemEvents: GroupSystemEvent[] = []
       let textLengthSum = 0
       let textCount = 0
+      let totalMessages = 0
 
       for (const pair of await findSessionMessageTables(chatroomId)) {
         try {
           const columns = await getMessageTableColumns(pair.dbPath, pair.tableName)
           const where = buildMessageStatsWhere({ range, contentColumn: columns.contentColumn || undefined })
+
+          const countWhere = buildMessageStatsWhere({ range })
+          const countRow = await dbAdapter.get<{ count: number }>(
+            'message',
+            pair.dbPath,
+            `SELECT COUNT(*) as count FROM "${pair.tableName}" ${countWhere.sql}`,
+            countWhere.params
+          )
+          totalMessages += Number(countRow?.count || 0)
 
           if (columns.contentColumn) {
             const textRows = await dbAdapter.all<{ msg_content: string; local_type: number }>(
@@ -555,11 +574,17 @@ class GroupAnalyticsService {
         .sort((a, b) => b.count - a.count)
         .slice(0, 20)
 
+      const joinCount = systemEvents.filter(e => e.type === 'join').length
+      const leaveCount = systemEvents.filter(e => e.type === 'leave').length
+
       const data: GroupEvents = {
         mentions,
         systemEvents: systemEvents.slice(-100),
         firstSpeaker: await this.getFirstSpeaker(chatroomId, startTime, endTime),
         averageMessageLength: textCount > 0 ? Math.round((textLengthSum / textCount) * 10) / 10 : 0,
+        totalMessages,
+        joinCount,
+        leaveCount,
       }
       if (errors.length > 0) Object.assign(data, { errors, partialFailureCount: errors.length })
       return { success: true, data }

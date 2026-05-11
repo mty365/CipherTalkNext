@@ -995,3 +995,327 @@
     }
   }
 }
+
+// ── 群事件洞察 / 消息细分 共用 ─────────────────────────────────────────
+
+.partial-failure-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 8px;
+  border-left: 3px solid rgba(239, 68, 68, 0.4);
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.kpi-card {
+  padding: 16px 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(8px);
+
+  .kpi-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--primary);
+    margin-bottom: 4px;
+    line-height: 1.2;
+
+    small {
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--text-tertiary);
+    }
+  }
+
+  .kpi-label {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+  }
+
+  &.kpi-accent-green .kpi-value { color: #22c55e; }
+  &.kpi-accent-red .kpi-value { color: #ef4444; }
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 12px;
+}
+
+// ── 群事件洞察 ────────────────────────────────────────────────────────
+
+.events-panel, .breakdown-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.events-section {
+  margin-bottom: 28px;
+}
+
+.first-speaker-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+
+  .first-speaker-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+
+    img { width: 100%; height: 100%; object-fit: cover; }
+
+    .avatar-placeholder {
+      width: 100%; height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex; align-items: center; justify-content: center; color: #fff;
+    }
+  }
+
+  .first-speaker-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .first-speaker-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, #ffd700, #ffb800);
+    color: #fff;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+}
+
+.mention-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  transition: background 0.15s;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .mention-rank {
+    width: 18px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .mention-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+
+    img { width: 100%; height: 100%; object-fit: cover; }
+
+    .avatar-placeholder {
+      width: 100%; height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      display: flex; align-items: center; justify-content: center; color: #fff;
+    }
+  }
+
+  .mention-name {
+    width: 96px;
+    font-size: 13px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+  }
+
+  .mention-bar-wrap {
+    flex: 1;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    overflow: hidden;
+
+    .mention-bar {
+      height: 100%;
+      background: var(--primary);
+      border-radius: 3px;
+      transition: width 0.4s ease;
+      min-width: 4px;
+    }
+  }
+
+  .mention-count {
+    font-size: 12px;
+    color: var(--text-secondary);
+    width: 48px;
+    text-align: right;
+    flex-shrink: 0;
+  }
+}
+
+.timeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timeline-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  transition: background 0.15s;
+
+  &:hover { background: rgba(255, 255, 255, 0.06); }
+
+  .timeline-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+
+    &.dot-join  { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, 0.5); }
+    &.dot-leave { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.5); }
+    &.dot-other { background: var(--text-tertiary); }
+  }
+
+  .timeline-type {
+    font-size: 11px;
+    font-weight: 600;
+    width: 28px;
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+  }
+
+  &.timeline-join  .timeline-type { color: #22c55e; }
+  &.timeline-leave .timeline-type { color: #ef4444; }
+
+  .timeline-content {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .timeline-time {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+}
+
+// ── 消息细分 ──────────────────────────────────────────────────────────
+
+.breakdown-section {
+  margin-bottom: 28px;
+}
+
+.bar-chart-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bar-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  .bar-label {
+    width: 68px;
+    font-size: 13px;
+    color: var(--text-primary);
+    text-align: right;
+    flex-shrink: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .bar-track {
+    flex: 1;
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
+
+    .bar-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.4s ease;
+      min-width: 3px;
+      opacity: 0.85;
+    }
+  }
+
+  .bar-pct {
+    width: 42px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .bar-count {
+    width: 52px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+    text-align: right;
+    flex-shrink: 0;
+  }
+}
+
+[data-mode="dark"] {
+  .kpi-card {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.06);
+  }
+
+  .first-speaker-card {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.06);
+  }
+}
