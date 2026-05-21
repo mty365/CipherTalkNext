@@ -1,9 +1,10 @@
-﻿import { type SetStateAction, useEffect, useRef, useState } from 'react'
-import { AlertCircle, Check, CheckCircle, ChevronDown, Download, Layers, Minus, Pause, Plug, Plus, RefreshCw, Trash2, Zap } from 'lucide-react'
+﻿import { type SetStateAction, useEffect, useState } from 'react'
+import { AlertCircle, Check, CheckCircle, Download, Layers, Minus, Pause, Plug, Plus, RefreshCw, Trash2, Zap } from 'lucide-react'
 import * as configService from '../../../services/config'
 import { formatFileSize } from '../utils'
 import { useSettingsStore } from '../settingsStore'
 import { ProgressBar, SegmentedControl, SelectableCard } from '../ui'
+import Select from '../../Select'
 
 const sttLanguageOptions = [
   { value: 'zh', label: '中文', enLabel: 'Chinese' },
@@ -80,8 +81,6 @@ function SttTab({ active, showMessage }: SttTabProps) {
   const setSttOnlineLanguage = (value: string) => setField('sttOnlineLanguage', value)
   const setSttOnlineTimeoutMs = (value: SetStateAction<number>) => setField('sttOnlineTimeoutMs', typeof value === 'function' ? value(sttOnlineTimeoutMs) : value)
   const setSttOnlineMaxConcurrency = (value: SetStateAction<number>) => setField('sttOnlineMaxConcurrency', typeof value === 'function' ? value(sttOnlineMaxConcurrency) : value)
-  const [showSttOnlineLanguageDropdown, setShowSttOnlineLanguageDropdown] = useState(false)
-  const sttOnlineLanguageRef = useRef<HTMLDivElement>(null)
   // ========== 语音转文字 (STT) 相关状态 ==========
   const [sttModelStatus, setSttModelStatus] = useState<{ exists: boolean; sizeBytes?: number } | null>(null)
   const [isLoadingSttStatus, setIsLoadingSttStatus] = useState(false)
@@ -951,34 +950,12 @@ function SttTab({ active, showMessage }: SttTabProps) {
           <div className="advanced-params-grid">
             <div className="param-item">
               <label>识别语言</label>
-              <div className="custom-select" ref={sttOnlineLanguageRef}>
-                <button
-                  type="button"
-                  className={`custom-select-trigger ${showSttOnlineLanguageDropdown ? 'is-open' : ''}`}
-                  onClick={() => setShowSttOnlineLanguageDropdown(prev => !prev)}
-                >
-                  <span>{sttOnlineLanguageOptions.find(option => option.value === sttOnlineLanguage)?.label || '自动识别'}</span>
-                  <ChevronDown size={16} />
-                </button>
-                {showSttOnlineLanguageDropdown && (
-                  <div className="custom-select-menu">
-                    {sttOnlineLanguageOptions.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        className={`custom-select-option ${sttOnlineLanguage === option.value ? 'is-active' : ''}`}
-                        onClick={() => {
-                          setSttOnlineLanguage(option.value)
-                          setShowSttOnlineLanguageDropdown(false)
-                        }}
-                      >
-                        <span>{option.label}</span>
-                        {sttOnlineLanguage === option.value && <Check size={14} />}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <Select
+                value={sttOnlineLanguage}
+                onChange={setSttOnlineLanguage}
+                options={sttOnlineLanguageOptions}
+                placeholder="自动识别"
+              />
             </div>
 
             <div className="param-item">

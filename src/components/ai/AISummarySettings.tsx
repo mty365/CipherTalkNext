@@ -1,100 +1,15 @@
-import { useState, useEffect, useRef } from 'react'
-import { Eye, EyeOff, Sparkles, Check, ChevronDown, ChevronUp, Zap, Star, FileText, HelpCircle, X, Plus, Settings2, Download, Trash2, Database, CheckCircle, AlertCircle, RefreshCw, Layers, Cpu, Cloud, Save, Pause } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Eye, EyeOff, Sparkles, Check, Zap, Star, FileText, HelpCircle, X, Plus, Settings2, Download, Trash2, Database, CheckCircle, AlertCircle, RefreshCw, Layers, Cpu, Cloud, Save, Pause } from 'lucide-react'
 import { getAIProviders, type AIProviderInfo, type EmbeddingDevice, type EmbeddingDeviceStatus, type EmbeddingMode, type EmbeddingModelDownloadProgress, type EmbeddingModelProfile, type EmbeddingModelStatus, type OnlineEmbeddingConfig, type OnlineEmbeddingProviderInfo } from '../../types/ai'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import AIProviderLogo from './AIProviderLogo'
+import Select from '../Select'
 import { useSettingsStore } from '../settings/settingsStore'
 import { ProgressBar } from '../settings/ui'
 import './AISummarySettings.scss'
 
 const DOWNLOAD_PAUSED_MESSAGE = '下载已暂停'
-
-interface CustomSelectProps {
-  value: string | number
-  onChange: (value: any) => void
-  options: { value: string | number; label: string }[]
-  placeholder?: string
-  editable?: boolean
-}
-
-function CustomSelect({ value, onChange, options, placeholder = '请选择', editable = false }: CustomSelectProps) {
-  const [isOpen, setIsOpen] = useState(false)
-  const [inputValue, setInputValue] = useState(value)
-  const containerRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    setInputValue(value)
-  }, [value])
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [])
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newVal = e.target.value
-    setInputValue(newVal)
-    onChange(newVal)
-    setIsOpen(true)
-  }
-
-  const handleOptionClick = (val: string | number) => {
-    onChange(val)
-    setInputValue(val)
-    setIsOpen(false)
-  }
-
-  return (
-    <div className={`custom-select-container ${isOpen ? 'open' : ''}`} ref={containerRef}>
-      <div className="select-trigger" onClick={() => !editable && setIsOpen(!isOpen)}>
-        {editable ? (
-          <input
-            type="text"
-            className="select-input"
-            value={inputValue}
-            onChange={handleInputChange}
-            onClick={() => setIsOpen(true)}
-            placeholder={placeholder}
-          />
-        ) : (
-          <span>{options.find(o => o.value === value?.toString())?.label || value || placeholder}</span>
-        )}
-        <div className="trigger-icon" onClick={(e) => {
-          e.stopPropagation()
-          setIsOpen(!isOpen)
-        }}>
-          {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-        </div>
-      </div>
-
-      {isOpen && (
-        <div className="select-options">
-          {options.map(opt => (
-            <div
-              key={opt.value}
-              className={`select-option ${value === opt.value ? 'selected' : ''}`}
-              onClick={() => handleOptionClick(opt.value)}
-            >
-              <span className="option-label">{opt.label}</span>
-              {value === opt.value && <Check size={14} className="check-icon" />}
-            </div>
-          ))}
-          {editable && inputValue && !options.some(o => o.value === inputValue) && (
-            <div className="select-option custom-value">
-              <span className="option-label">使用自定义值: {inputValue}</span>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
 
 interface AISummarySettingsProps {
   showMessage: (text: string, success: boolean) => void
@@ -1037,7 +952,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
         <div className="form-row">
           <div className="form-group">
             <label>选择模型 (支持手动输入)</label>
-            <CustomSelect
+            <Select
               value={model}
               onChange={setModel}
               options={modelOptions}
@@ -1048,7 +963,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
 
           <div className="form-group">
             <label>默认分析范围</label>
-            <CustomSelect
+            <Select
               value={defaultTimeRange}
               onChange={setDefaultTimeRange}
               options={timeRangeOptions}
@@ -1251,7 +1166,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
           {embeddingProfile && embeddingDimOptions.length > 1 && (
             <div className="form-group semantic-vector-dim">
               <label>向量维度</label>
-              <CustomSelect
+              <Select
                 value={embeddingProfile.dim}
                 onChange={handleEmbeddingDimChange}
                 options={embeddingDimOptions}
@@ -1272,7 +1187,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
               <p>{onlineEmbeddingStatusText}</p>
             </div>
             {onlineEmbeddingConfigs.length > 0 && (
-              <CustomSelect
+              <Select
                 value={currentOnlineEmbeddingConfigId}
                 onChange={handleOnlineConfigSelect}
                 options={onlineEmbeddingConfigOptions}
@@ -1293,7 +1208,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
             </div>
             <div className="form-group">
               <label>厂商</label>
-              <CustomSelect
+              <Select
                 value={onlineEmbeddingProviderId}
                 onChange={handleOnlineProviderChange}
                 options={onlineEmbeddingProviderOptions}
@@ -1304,7 +1219,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
           <div className="form-row">
             <div className="form-group">
               <label>模型</label>
-              <CustomSelect
+              <Select
                 value={onlineEmbeddingModel}
                 onChange={handleOnlineModelChange}
                 options={onlineEmbeddingModelOptions}
@@ -1314,7 +1229,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
             </div>
             <div className="form-group">
               <label>向量维度</label>
-              <CustomSelect
+              <Select
                 value={onlineEmbeddingDim}
                 onChange={(value) => setOnlineEmbeddingDim(Number(value))}
                 options={onlineEmbeddingDimOptions}
@@ -1533,9 +1448,9 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
       <div className="settings-form" style={{ marginTop: '8px' }}>
         <div className="form-group">
           <label>提示词模板</label>
-          <CustomSelect
+          <Select<string>
             value={systemPromptPreset}
-            onChange={setSystemPromptPreset}
+            onChange={(v) => setSystemPromptPreset(v as typeof systemPromptPreset)}
             options={systemPromptPresetOptions}
           />
           <div className="form-hint">
@@ -1684,7 +1599,7 @@ function AISummarySettings({ showMessage }: AISummarySettingsProps) {
                   )}
                   <div className="form-group">
                     <label>模型</label>
-                    <CustomSelect
+                    <Select
                       value={newPresetModel}
                       onChange={setNewPresetModel}
                       options={providers.find(p => p.id === newPresetProvider)?.models.map(m => ({ value: m, label: m })) || []}

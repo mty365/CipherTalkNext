@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
 import './Select.scss'
@@ -7,6 +7,8 @@ export interface SelectOption<T extends string | number = string> {
   value: T
   label: ReactNode
   description?: ReactNode
+  /** 展开列表中的自定义渲染内容（用于视觉预览型选项），提供后取代 label/description */
+  content?: ReactNode
   disabled?: boolean
 }
 
@@ -15,6 +17,10 @@ interface SelectProps<T extends string | number = string> {
   value: T
   onChange: (value: T) => void
   placeholder?: string
+  /** 展开后选项的排布方向，默认纵向列表 */
+  layout?: 'vertical' | 'horizontal'
+  /** 可编辑模式：触发器变成文本输入框，允许填写列表以外的自定义值 */
+  editable?: boolean
   className?: string
   style?: CSSProperties
 }
@@ -24,21 +30,34 @@ function Select<T extends string | number = string>({
   value,
   onChange,
   placeholder = '请选择',
+  layout = 'vertical',
+  editable = false,
   className = '',
   style
 }: SelectProps<T>) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
-  const triggerRef = useRef<HTMLButtonElement>(null)
+  const triggerRef = useRef<HTMLElement | null>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const listId = useId()
   const [triggerH, setTriggerH] = useState(0)
   const [listH, setListH] = useState(0)
 
   // 测量触发器与列表高度 —— 盒子靠显式高度才能平滑「生长」
   useLayoutEffect(() => {
+    const listEl = listRef.current
     setTriggerH(triggerRef.current?.offsetHeight ?? 0)
-    setListH(listRef.current?.scrollHeight ?? 0)
-  }, [options])
+    if (!listEl) {
+      setListH(0)
+      return
+    }
+
+    const maxListHeight = Number.parseFloat(getComputedStyle(listEl).maxHeight)
+    const visibleListHeight = Number.isFinite(maxListHeight)
+      ? Math.min(listEl.scrollHeight, maxListHeight)
+      : listEl.offsetHeight
+    setListH(visibleListHeight)
+  }, [options, layout, value, open])
 
   useEffect(() => {
     if (!open) return
@@ -56,8 +75,22 @@ function Select<T extends string | number = string>({
     }
   }, [open])
 
+  const setTriggerRef = (el: HTMLElement | null) => { triggerRef.current = el }
   const selected = options.find((o) => o.value === value)
-  const classes = ['glass-select', open ? 'open' : '', className].filter(Boolean).join(' ')
+  const inputValue = value != null ? String(value) : ''
+  const displayText = selected?.label
+    ?? (value != null && String(value) !== '' ? String(value) : placeholder)
+  const hasCustomValue = editable
+    && value != null && String(value) !== ''
+    && !options.some((o) => o.value === value)
+
+  const classes = [
+    'glass-select',
+    `glass-select--${layout}`,
+    editable ? 'glass-select--editable' : '',
+    open ? 'open' : '',
+    className
+  ].filter(Boolean).join(' ')
   const boxHeight = triggerH ? (open ? triggerH + listH : triggerH) : undefined
 
   return (
@@ -67,16 +100,71 @@ function Select<T extends string | number = string>({
       ref={rootRef}
     >
       <div className="glass-select-box" style={{ height: boxHeight }}>
-        <button
-          ref={triggerRef}
-          type="button"
-          className="glass-select-trigger"
-          onClick={() => setOpen((v) => !v)}
+        {editable ? (
+          <div className="glass-select-trigger glass-select-trigger--editable" ref={setTriggerRef}>
+            <input
+              type="text"
+              role="combobox"
+              className="glass-select-input"
+              value={inputValue}
+              placeholder={placeholder}
+              autoComplete="off"
+              aria-expanded={open}
+              aria-controls={listId}
+              aria-autocomplete="list"
+              onChange={(e) => {
+                onChange(e.target.value as T)
+                setOpen(true)
+              }}
+              onFocus={() => setOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setOpen(true)
+                }
+                if (e.key === 'Enter') {
+                  const matched = options.find((option) => (
+                    !option.disabled && String(option.value) === e.currentTarget.value
+                  ))
+                  if (matched) onChange(matched.value)
+                  setOpen(false)
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="glass-select-toggle"
+              tabIndex={-1}
+              aria-label={open ? '收起选项' : '展开选项'}
+              aria-expanded={open}
+              aria-controls={listId}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setOpen((v) => !v)}
+            >
+              <ChevronDown size={16} className="glass-select-arrow" />
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className="glass-select-trigger"
+            ref={setTriggerRef}
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            aria-controls={listId}
+            onClick={() => setOpen((v) => !v)}
+          >
+            <span className="glass-select-value">{displayText}</span>
+            <ChevronDown size={16} className="glass-select-arrow" />
+          </button>
+        )}
+        <div
+          id={listId}
+          className="glass-select-list"
+          ref={listRef}
+          role="listbox"
+          aria-hidden={!open}
         >
-          <span className="glass-select-value">{selected?.label ?? placeholder}</span>
-          <ChevronDown size={16} className="glass-select-arrow" />
-        </button>
-        <div className="glass-select-list" ref={listRef} role="listbox">
           {options.map((option, index) => (
             <button
               key={String(option.value)}
@@ -84,25 +172,48 @@ function Select<T extends string | number = string>({
               role="option"
               aria-selected={option.value === value}
               disabled={option.disabled}
+              tabIndex={open ? 0 : -1}
               style={{ ['--i']: index } as CSSProperties}
-              className={`glass-select-option ${option.value === value ? 'is-selected' : ''}`}
+              className={[
+                'glass-select-option',
+                option.value === value ? 'is-selected' : '',
+                option.content ? 'has-content' : ''
+              ].filter(Boolean).join(' ')}
               onClick={() => {
                 if (option.disabled) return
                 onChange(option.value)
                 setOpen(false)
               }}
             >
-              <span className="glass-select-option-main">
-                <span className="glass-select-option-label">{option.label}</span>
-                {option.description && (
-                  <span className="glass-select-option-desc">{option.description}</span>
-                )}
-              </span>
+              {option.content ?? (
+                <span className="glass-select-option-main">
+                  <span className="glass-select-option-label">{option.label}</span>
+                  {option.description && (
+                    <span className="glass-select-option-desc">{option.description}</span>
+                  )}
+                </span>
+              )}
               {option.value === value && (
                 <Check size={15} className="glass-select-option-check" />
               )}
             </button>
           ))}
+          {hasCustomValue && (
+            <button
+              type="button"
+              className="glass-select-option glass-select-option--custom is-selected"
+              tabIndex={open ? 0 : -1}
+              style={{ ['--i']: options.length } as CSSProperties}
+              onClick={() => setOpen(false)}
+            >
+              <span className="glass-select-option-main">
+                <span className="glass-select-option-label">
+                  使用自定义值：{String(value)}
+                </span>
+              </span>
+              <Check size={15} className="glass-select-option-check" />
+            </button>
+          )}
         </div>
       </div>
     </div>

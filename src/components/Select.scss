@@ -13,10 +13,14 @@
     z-index: 100;
     overflow: hidden;
     border-radius: 20px;
-    background: var(--card-bg);
+    // 悬浮下拉必须基本不透明，否则会透出下方表单内容、看着像两层叠在一起
+    background: rgba(26, 25, 23, 0.97);
     border: 1px solid var(--border-color);
-    // 高度做主过渡：expo-out，干脆地「长开 / 收回」
-    transition: height 0.44s cubic-bezier(0.16, 1, 0.3, 1);
+    // 毛玻璃模糊：弱化边缘透出的内容
+    backdrop-filter: blur(16px);
+    transition:
+      height 0.44s cubic-bezier(0.16, 1, 0.3, 1),
+      border-color 0.16s ease;
   }
 
   // 触发器：盒子顶部常驻的一行，背景透明，与盒子融为一体
@@ -35,6 +39,70 @@
     cursor: pointer;
   }
 
+  // 可编辑模式：触发器为输入框 + 箭头按钮
+  .glass-select-trigger--editable {
+    justify-content: stretch;
+    gap: 0;
+    padding: 0;
+    cursor: text;
+
+    .glass-select-toggle {
+      display: flex;
+      align-items: center;
+      padding: 11px 14px 11px 6px;
+      border: none;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+    }
+  }
+
+  // 彻底重置，避免被设置页全局 input 样式污染（边框/背景/圆角/阴影）
+  &.glass-select--editable {
+    .glass-select-trigger.glass-select-trigger--editable > input.glass-select-input.glass-select-input {
+      flex: 1;
+      min-width: 0;
+      width: auto;
+      height: auto;
+      min-height: 0;
+      margin: 0;
+      padding: 11px 4px 11px 14px;
+      border: none;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+      appearance: none;
+      -webkit-appearance: none;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+      color: var(--text-primary);
+      outline: none;
+
+      &:focus,
+      &:focus-visible,
+      &:hover {
+        border: none;
+        background: transparent;
+        box-shadow: none;
+        outline: none;
+      }
+
+      &::placeholder {
+        color: var(--text-tertiary);
+        font-weight: 400;
+      }
+    }
+  }
+
+  &:focus-within,
+  &.open {
+    .glass-select-box {
+      border-color: color-mix(in srgb, var(--primary) 40%, var(--border-color));
+    }
+  }
+
   .glass-select-value {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -49,7 +117,19 @@
 
   // 列表：被盒子裁切，盒子长高时从同一个容器里「生长」出来
   .glass-select-list {
+    box-sizing: border-box;
+    max-height: var(--glass-select-list-max-height, 240px);
+    overflow-y: auto;
     padding: 2px 6px 6px;
+
+    &::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    &::-webkit-scrollbar-thumb {
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--text-tertiary) 45%, transparent);
+    }
   }
 
   .glass-select-option {
@@ -67,7 +147,7 @@
     transition: background 0.15s ease;
 
     &:hover:not(:disabled) {
-      background: rgba(var(--primary-rgb), 0.1);
+      background: color-mix(in srgb, var(--primary) 22%, transparent);
     }
 
     &:disabled {
@@ -76,7 +156,11 @@
     }
 
     &.is-selected {
-      background: rgba(var(--primary-rgb), 0.12);
+      background: color-mix(in srgb, var(--primary) 14%, transparent);
+    }
+
+    &.is-selected:hover:not(:disabled) {
+      background: color-mix(in srgb, var(--primary) 30%, transparent);
     }
   }
 
@@ -106,6 +190,11 @@
 
   .is-selected .glass-select-option-label {
     color: var(--primary);
+  }
+
+  // 可编辑模式下的「使用自定义值」行
+  .glass-select-option--custom .glass-select-option-label {
+    font-style: italic;
   }
 
   // 展开态
