@@ -24,6 +24,7 @@ import { useTopToast } from './hooks/useTopToast'
 import type { BatchImageMessage } from './types'
 import { checkOnlineSttConfigReady } from './utils/sttConfig'
 import { formatSessionTime } from './utils/time'
+import { installJankMonitor, jankMark, jankReport } from '../../utils/jankMonitor'
 
 interface ChatPageProps {
   // 保留接口以备将来扩展
@@ -38,11 +39,21 @@ function getMessageCacheKey(message: Message): string {
   return `${message.serverId}-${message.localId}-${message.createTime}-${message.sortSeq}`
 }
 
+// 历史分页大小：初次进会话用较大值铺满屏幕；滚动"加载更多"用较小值，
+// 减小单次 prepend 的渲染阻塞（一次性 mount 50 条约卡 180ms，25 条约减半）。
+const INITIAL_PAGE_SIZE = 50
+const HISTORY_PAGE_SIZE = 25
+
 function ChatPage(_props: ChatPageProps) {
   const [quoteStyle, setQuoteStyle] = useState<QuoteStyleConfig>('default')
 
   useEffect(() => {
     getQuoteStyle().then(setQuoteStyle).catch(console.error)
+  }, [])
+
+  // 卡顿检测：监听主线程长任务并关联业务事件，定位卡顿来源
+  useEffect(() => {
+    installJankMonitor()
   }, [])
 
   const {
@@ -445,15 +456,17 @@ function ChatPage(_props: ChatPageProps) {
       const oldestLoadedMessage = messagesRef.current[0]
       const oldestSortSeq = Number(oldestLoadedMessage?.sortSeq || 0)
       const useCursorPagination = offset > 0 && oldestLoadedMessage !== undefined && Number.isFinite(oldestSortSeq) && oldestSortSeq > 0
+      const fetchStartedAt = performance.now()
       const result = useCursorPagination
         ? await window.electronAPI.chat.getMessagesBefore(
           sessionId,
           oldestSortSeq,
-          50,
+          HISTORY_PAGE_SIZE,
           typeof oldestLoadedMessage.createTime === 'number' ? oldestLoadedMessage.createTime : undefined,
           typeof oldestLoadedMessage.localId === 'number' ? oldestLoadedMessage.localId : undefined
         )
-        : await window.electronAPI.chat.getMessages(sessionId, offset, 50)
+        : await window.electronAPI.chat.getMessages(sessionId, offset, INITIAL_PAGE_SIZE)
+      jankReport(`history:fetch ${offset === 0 ? 'init' : 'more'} (${result?.messages?.length ?? 0} 条)`, performance.now() - fetchStartedAt, 200)
 
       if (currentSessionIdRef.current !== sessionId || loadSeq !== messageLoadSeqRef.current) {
         return
@@ -470,6 +483,7 @@ function ChatPage(_props: ChatPageProps) {
           if (msgs.length === 0) {
             setHasMoreMessages(false)
           } else {
+            jankMark(`history:render prepend +${msgs.length} 条`)
             queuePrependScrollRestore(msgs.length)
             appendMessages(msgs, true)
             setHasMoreMessages(hasMore)
@@ -698,13 +712,15 @@ function ChatPage(_props: ChatPageProps) {
     isLoadingMoreRef.current = true
     setLoadingMore(true)
     try {
+      const fetchStartedAt = performance.now()
       const result = await window.electronAPI.chat.getMessagesBefore(
         currentSessionId,
         dateJumpCursorSortSeq,
-        50,
+        HISTORY_PAGE_SIZE,
         dateJumpCursorCreateTime ?? undefined,
         dateJumpCursorLocalId ?? undefined
       )
+      jankReport(`history:fetch before (${result?.messages?.length ?? 0} 条)`, performance.now() - fetchStartedAt, 200)
 
       if (result.success && result.messages) {
         const existingKeys = new Set(
@@ -723,6 +739,7 @@ function ChatPage(_props: ChatPageProps) {
         const oldestCreateTime = uniqueOlderMessages[0]?.createTime
         const oldestLocalId = uniqueOlderMessages[0]?.localId
 
+        jankMark(`history:render prepend +${uniqueOlderMessages.length} 条`)
         queuePrependScrollRestore(uniqueOlderMessages.length)
         appendMessages(uniqueOlderMessages, true)
         if (typeof oldestSortSeq !== 'number' || oldestSortSeq >= dateJumpCursorSortSeq) {
@@ -781,13 +798,15 @@ function ChatPage(_props: ChatPageProps) {
     isLoadingMoreRef.current = true
     setLoadingMore(true)
     try {
+      const fetchStartedAt = performance.now()
       const result = await window.electronAPI.chat.getMessagesAfter(
         currentSessionId,
         dateJumpCursorSortSeqEnd,
-        50,
+        HISTORY_PAGE_SIZE,
         dateJumpCursorCreateTimeEnd ?? undefined,
         dateJumpCursorLocalIdEnd ?? undefined
       )
+      jankReport(`history:fetch after (${result?.messages?.length ?? 0} 条)`, performance.now() - fetchStartedAt, 200)
 
       if (result.success && result.messages) {
         const existingKeys = new Set(
@@ -803,6 +822,7 @@ function ChatPage(_props: ChatPageProps) {
         }
 
         // 追加到消息列表末尾
+        jankMark(`history:render append +${uniqueNewerMessages.length} 条`)
         appendMessages(uniqueNewerMessages, false)
 
         // 更新向下滑动游标

@@ -3,7 +3,7 @@ import { Loader2, RefreshCw, Image as ImageIcon } from 'lucide-react'
 import { LivePhotoIcon } from '../../../../components/LivePhotoIcon'
 import type { ChatSession, Message } from '../../../../types/models'
 import { resolveImageDisplaySize, type ImageDisplaySize } from '../../utils/imageSize'
-import { enqueueDecrypt, imageDataUrlCache } from './mediaState'
+import { enqueueDecrypt, imageDataUrlCache, subscribeImageUpdate, subscribeImageCacheResolved } from './mediaState'
 
 type ImageStatusVariant = 'placeholder' | 'loading' | 'unavailable' | 'no-key'
 
@@ -420,9 +420,9 @@ function ImageBubble({ message, session, hasImageKey, onContextMenu }: ImageBubb
     detectImageMimeFromBase64
   ])
 
-  // 监听图片更新事件
+  // 监听图片更新事件（共享分发器，避免每条气泡各自注册 IPC 监听）
   useEffect(() => {
-    const unsubscribe = window.electronAPI.image.onUpdateAvailable((payload) => {
+    return subscribeImageUpdate((payload) => {
       const matchesCacheKey =
         payload.cacheKey === message.imageMd5 ||
         payload.cacheKey === message.imageDatName ||
@@ -432,14 +432,11 @@ function ImageBubble({ message, session, hasImageKey, onContextMenu }: ImageBubb
         setImageHasUpdate(true)
       }
     })
-    return () => {
-      unsubscribe?.()
-    }
   }, [message.imageDatName, message.imageMd5])
 
-  // 监听缓存解析事件
+  // 监听缓存解析事件（共享分发器）
   useEffect(() => {
-    const unsubscribe = window.electronAPI.image.onCacheResolved((payload) => {
+    return subscribeImageCacheResolved((payload) => {
       const matchesCacheKey =
         payload.cacheKey === message.imageMd5 ||
         payload.cacheKey === message.imageDatName ||
@@ -452,9 +449,6 @@ function ImageBubble({ message, session, hasImageKey, onContextMenu }: ImageBubb
         setImageError(false)
       }
     })
-    return () => {
-      unsubscribe?.()
-    }
   }, [imageCacheKey, message.imageDatName, message.imageMd5])
 
   // 没有配置密钥时显示提示

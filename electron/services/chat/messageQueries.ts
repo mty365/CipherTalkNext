@@ -488,6 +488,11 @@ export async function getMessagesBefore(state: ChatServiceState,
     const effectiveCursorLocalId = cursorLocalId ?? Number.MAX_SAFE_INTEGER
     const useSortSeqCursor = hasUsableSortSeqCursor(cursorSortSeq)
 
+    // 分段计时：定位 230ms 到底花在 SQL 执行还是逐行解析（>120ms 才打印，避免刷屏）
+    const queryStartedAt = Date.now()
+    let sqlMs = 0
+    let mapMs = 0
+
     for (const { tableName, dbPath } of dbTablePairs) {
       try {
         const hasName2IdTable = await checkTableExists(state, dbPath, 'Name2Id')
@@ -495,6 +500,7 @@ export async function getMessagesBefore(state: ChatServiceState,
 
         let sql: string
         let rows: any[]
+        const sqlStartedAt = Date.now()
 
         if (hasName2IdTable && myRowId !== null) {
           if (useSortSeqCursor) {
@@ -614,9 +620,13 @@ export async function getMessagesBefore(state: ChatServiceState,
           }
         }
 
+        sqlMs += Date.now() - sqlStartedAt
+
+        const mapStartedAt = Date.now()
         for (const row of rows) {
           allMessages.push(rowToMessage(state, row))
         }
+        mapMs += Date.now() - mapStartedAt
       } catch (e: any) {
         if (e?.code === 'SQLITE_CORRUPT' || e?.message?.includes('malformed')) {
           console.error(`[ChatService] 数据库损坏: ${dbPath}`, e)
@@ -640,6 +650,12 @@ export async function getMessagesBefore(state: ChatServiceState,
     const hasMore = allMessages.length > limit
     const messages = allMessages.slice(0, limit)
     messages.reverse()
+
+    const totalMs = Date.now() - queryStartedAt
+    if (totalMs >= 120) {
+      // other = 表/rowid 解析 + 排序去重；sql=SQLite 执行；map=逐行解码解析
+      console.info(`[MsgQuery] before total=${totalMs}ms sql=${sqlMs}ms map=${mapMs}ms other=${totalMs - sqlMs - mapMs}ms rows=${allMessages.length}`)
+    }
 
     return { success: true, messages, hasMore }
   } catch (e) {
