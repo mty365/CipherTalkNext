@@ -887,6 +887,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
             stats: persona.stats,
             profile: persona.profile,
             notes,
+            stickers: persona.stickers,
           },
           messages,
         },
@@ -1066,7 +1067,11 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
 
       const transcript = unreflected
         .map((m) => {
-          const text = textFromUiMessage(m).replace(/\n+/g, '／').trim()
+          // 表情包气泡的 JSON 载荷对反思没用，压成可读标记
+          const text = textFromUiMessage(m)
+            .replace(/\[表情包\]\{[^}]*\}/g, '[发了个表情包]')
+            .replace(/\n+/g, '／')
+            .trim()
           return text ? `${m.role === 'user' ? '我' : `${persona.displayName}（分身）`}: ${text}` : ''
         })
         .filter(Boolean)
@@ -1222,6 +1227,13 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         }
       }
 
+      // 表情包词典：TA 私聊+群聊发过的表情包按使用频率统计，聊天时模型可按编号点播
+      const { collectStickers, mergeStickers } = await import('../../services/agent/persona/personaStickers')
+      const stickers = mergeStickers(
+        collectStickers(messages, (m) => m.isSend !== 1),
+        groupCorpus?.stickers || [],
+      )
+
       sendProgress('saving', '正在保存画像', 88)
       const { personaStore } = await import('../../services/agent/persona/personaStore')
       const corpusUntil = messages.reduce((max, m) => Math.max(max, m.createTime), 0)
@@ -1232,6 +1244,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         fewShots: extracted.fewShots,
         stats,
         profile,
+        stickers,
         corpusUntil,
         modelProvider: providerConfig.name,
         modelId: providerConfig.model,
@@ -1255,6 +1268,7 @@ export function registerAiHandlers(ctx: MainProcessContext): void {
         elapsedMs: Date.now() - startedAt,
         friendMessageCount: corpus.stats.friendMessageCount,
         groupMessageCount: groupCorpus?.friendMessageCount || 0,
+        stickerCount: stickers.length,
         fewShotCount: persona.fewShots.length,
         profileChunkCount: profileChunks.length,
         hasProfile: !!profile,

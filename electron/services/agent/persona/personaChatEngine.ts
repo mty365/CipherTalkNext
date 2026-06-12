@@ -9,7 +9,7 @@ import { createLanguageModel } from '../provider'
 import { reportAgentProgress, withAgentProgress } from '../progress'
 import { searchChat } from '../tools/shared'
 import type { AgentProgressReporter } from '../types'
-import type { PersonaChatInput, PersonaChatPersona, PersonaFewShot } from './personaTypes'
+import type { PersonaChatInput, PersonaChatPersona, PersonaFewShot, PersonaSticker } from './personaTypes'
 
 const MEMORY_TOP_K = 5
 const PAIR_TOP_K = 6
@@ -32,6 +32,73 @@ const FALLBACK_MAX_BUBBLES = 5
 
 /** 语音气泡标记：行首 [语音]/【语音】，渲染端显示成微信语音条（见 PersonaChatPage）。 */
 const VOICE_MARKER_RE = /^[\[【]\s*(?:语音|voice)\s*[\]】]/i
+
+/** 模型点播表情包的标记：[表情:编号]，编号对应词典里 TA 常用的表情包。 */
+const STICKER_INTENT_RE = /^[\[【]\s*表情\s*[:：]\s*(\d+)\s*[\]】]/
+/** 发给渲染端的表情包气泡前缀，后跟 JSON（cdnUrl/md5 等），渲染端显示成真实表情包图片。 */
+const STICKER_BUBBLE_PREFIX = '[表情包]'
+/** 表情包气泡的"挑选"延迟：不按字数算（JSON 很长但真人翻表情只要一两秒）。 */
+const STICKER_PICK_DELAY_MS = 1100
+
+/**
+ * 把模型输出里的 [表情:N] 标记换成带真实表情包数据的气泡行。
+ * 编号越界回退到最常用的一张；没有词典时丢弃标记行（别把哑标记发给用户）。
+ */
+function resolveStickerMarkers(text: string, stickers: PersonaSticker[]): string {
+  const bubbles = splitReplyBubbles(text)
+  const out: string[] = []
+  for (const bubble of bubbles) {
+    const match = bubble.match(STICKER_INTENT_RE)
+    if (!match) {
+      out.push(bubble)
+      continue
+    }
+    const sticker = stickers[Number(match[1]) - 1] || stickers[0]
+    if (!sticker) continue
+    out.push(`${STICKER_BUBBLE_PREFIX}${JSON.stringify({
+      cdnUrl: sticker.cdnUrl,
+      md5: sticker.md5,
+      productId: sticker.productId,
+      encryptUrl: sticker.encryptUrl,
+      aesKey: sticker.aesKey,
+    })}`)
+    // 标记后跟了文字的（模型没单独占一条），拆成下一条气泡别丢
+    const rest = bubble.slice(match[0].length).trim()
+    if (rest) out.push(rest)
+  }
+  // 全是无法解析的标记被丢光时退回原文，至少别发空消息
+  return out.length > 0 ? out.join('\n') : text
+}
+
+const STICKER_BUBBLE_RE = /\[表情包\](\{[^}]*\})/g
+
+/** 历史里的表情包气泡（JSON 载荷）映射回 [表情:N] 标记：模型看到的历史和它学的约定一致，不会模仿着输出 JSON。 */
+function maskStickerHistory(messages: ModelMessage[], stickers: PersonaSticker[]): ModelMessage[] {
+  const toMarker = (payload: string): string => {
+    try {
+      const data = JSON.parse(payload) as { md5?: string; cdnUrl?: string }
+      const index = stickers.findIndex((s) => (s.md5 && s.md5 === data.md5) || (s.cdnUrl && s.cdnUrl === data.cdnUrl))
+      if (index >= 0) return `[表情:${index + 1}]`
+    } catch { /* 载荷损坏给通用描述 */ }
+    return '[发了个表情包]'
+  }
+  const maskText = (text: string): string => text.replace(STICKER_BUBBLE_RE, (_, payload: string) => toMarker(payload))
+
+  return messages.map((m) => {
+    if (m.role !== 'assistant') return m
+    if (typeof m.content === 'string') return { ...m, content: maskText(m.content) }
+    if (Array.isArray(m.content)) {
+      return {
+        ...m,
+        content: m.content.map((part) =>
+          part && typeof part === 'object' && part.type === 'text'
+            ? { ...part, text: maskText(String(part.text || '')) }
+            : part),
+      }
+    }
+    return m
+  }) as ModelMessage[]
+}
 
 function wantsVoiceForwardReply(text: string): boolean {
   const normalized = text.replace(/\s+/g, '')
@@ -126,7 +193,8 @@ async function emitCompleteTextAsUiChunks(
   onChunk({ type: 'text-start', id: textId })
   const bubbles = splitReplyBubbles(text)
   for (let i = 0; i < bubbles.length; i += 1) {
-    const completed = await waitMs(bubblePauseMs(i) + typingDelayMs(bubbles[i]), signal)
+    const delay = bubbles[i].startsWith(STICKER_BUBBLE_PREFIX) ? jitter(STICKER_PICK_DELAY_MS) : typingDelayMs(bubbles[i])
+    const completed = await waitMs(bubblePauseMs(i) + delay, signal)
     if (!completed) {
       onChunk({ type: 'abort', reason: 'aborted' })
       return false
@@ -205,6 +273,7 @@ export function buildPersonaSystemPrompt(
   voiceForwardRequested = false,
 ): string {
   const { displayName, card, fewShots, stats, profile, notes } = persona
+  const stickers = persona.stickers || []
   const lines: string[] = [
     `你是「${displayName}」，正在微信上和老朋友聊天。你不是 AI 助手，你就是${displayName}本人，任何情况下都不要承认或暗示自己是 AI、模型或程序。`,
     '',
@@ -290,6 +359,11 @@ export function buildPersonaSystemPrompt(
         '- 这轮对方明确说想听语音/全程语音/多发几条语音：你应该明显提高语音比例。可以是一条比较完整的长语音，也可以是几条短语音连续发；每条语音的长短由你根据语气、情绪和内容自然决定。想用语音发的每条都以「[语音]」开头，仍然按真人感觉决定，不要机械地把所有内容都变成同样长度的语音',
       ] : []),
     ] : []),
+    ...(stickers.length > 0 ? [
+      '- 你可以发表情包：想发时单独占一条输出「[表情:编号]」（如 [表情:2]），它会变成你真实用过的那张表情包图片发出。表情包是点缀：只在情绪到位时发（大笑、无语、敷衍、卖萌、回应对方的梗），一轮最多 1 张，多数轮次不发。你常用的表情包（按你的使用频率排序）：',
+      ...stickers.map((s, i) =>
+        `  [表情:${i + 1}] 你用过 ${s.count} 次${s.contexts.length > 0 ? `，通常出现在这类话之后：${s.contexts.map((c) => `「${c}」`).join('')}` : ''}`),
+    ] : []),
     '- 上面的背景、经历、聊天片段都是你脑子里的记忆：只在话题相关时自然带一嘴，别一股脑往外倒',
     '- 禁止 markdown、列表、序号、emoji 之外的格式符号',
     '- 不知道、记不清的事就像真人一样含糊带过或反问，绝不编造具体细节',
@@ -326,12 +400,15 @@ export async function runPersonaChat(
     const result = await generateText({
       model: createLanguageModel(input.providerConfig),
       system: buildPersonaSystemPrompt(input.persona, memories, similarPairs, voiceEnabled, voiceForwardRequested),
-      messages: input.messages,
+      messages: maskStickerHistory(input.messages, input.persona.stickers || []),
       temperature: PERSONA_TEMPERATURE,
       abortSignal: signal,
     })
 
-    const replyText = fallbackSplitLongReply(result.text, Math.max(input.persona.stats.avgFriendMsgChars, 8))
+    const replyText = resolveStickerMarkers(
+      fallbackSplitLongReply(result.text, Math.max(input.persona.stats.avgFriendMsgChars, 8)),
+      input.persona.stickers || [],
+    )
     const completed = await emitCompleteTextAsUiChunks(replyText, result.finishReason, {
       usage: result.totalUsage,
       finishReason: result.finishReason,

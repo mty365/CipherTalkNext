@@ -162,9 +162,11 @@ img {
 .pet-notice {
   position: relative;
   overflow: hidden;
+  /* 桌宠窗口透明、背后是桌面壁纸，backdrop-filter 模糊不到它，
+     底色必须自带足够不透明度才能保证任意壁纸下文字可读 */
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.06)),
-    rgba(18, 18, 18, 0.2);
+    rgba(20, 20, 24, 0.78);
   border: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.28);
   backdrop-filter: blur(32px) saturate(0.9);
@@ -195,7 +197,7 @@ img {
 .pet-notice:hover {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.08)),
-    rgba(18, 18, 18, 0.18);
+    rgba(20, 20, 24, 0.82);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.3);
   transform: translateY(-1px);
 }

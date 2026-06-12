@@ -32,19 +32,77 @@ function splitBubbles(text: string): string[] {
 /** 语音气泡标记（与 personaChatEngine 的提示词约定一致）：行首 [语音]/【语音】。 */
 const VOICE_MARKER_RE = /^[\[【]\s*(?:语音|voice)\s*[\]】]\s*/i
 
+/** 表情包气泡标记（personaChatEngine 把 [表情:N] 解析后发出）：前缀 + JSON（cdnUrl/md5 等）。 */
+const STICKER_BUBBLE_PREFIX = '[表情包]'
+
+interface PersonaStickerData {
+  cdnUrl?: string
+  md5?: string
+  productId?: string
+  encryptUrl?: string
+  aesKey?: string
+}
+
 interface PersonaBubble {
   text: string
   isVoice: boolean
   /** 估算语音时长（秒）：中文语速约 4 字/秒，1-60 截断 */
   seconds: number
+  /** 表情包气泡：有值时渲染成表情包图片 */
+  sticker?: PersonaStickerData
 }
 
 function parseBubble(raw: string): PersonaBubble {
+  if (raw.startsWith(STICKER_BUBBLE_PREFIX)) {
+    try {
+      const sticker = JSON.parse(raw.slice(STICKER_BUBBLE_PREFIX.length)) as PersonaStickerData
+      if (sticker && (sticker.cdnUrl || sticker.md5)) return { text: '', isVoice: false, seconds: 0, sticker }
+    } catch { /* JSON 损坏按普通文本显示 */ }
+  }
   const match = raw.match(VOICE_MARKER_RE)
   if (!match) return { text: raw, isVoice: false, seconds: 0 }
   const text = raw.slice(match[0].length).trim()
   if (!text) return { text: raw, isVoice: false, seconds: 0 }
   return { text, isVoice: true, seconds: Math.min(60, Math.max(1, Math.round(Array.from(text).length / 4))) }
+}
+
+/** 表情包 dataUrl/本地路径缓存（窗口级）：同一张表情多次出现只下载一次。 */
+const stickerSrcCache = new Map<string, string>()
+
+/** 表情包气泡：经主进程 downloadEmoji 下载/解密后显示真实表情包图片。 */
+function PersonaStickerBubble({ sticker }: { sticker: PersonaStickerData }) {
+  const cacheKey = sticker.md5 || sticker.cdnUrl || ''
+  const [src, setSrc] = useState<string | undefined>(() => stickerSrcCache.get(cacheKey))
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    if (!cacheKey || src || failed) return
+    let cancelled = false
+    window.electronAPI.chat
+      .downloadEmoji(sticker.cdnUrl || '', sticker.md5, sticker.productId, undefined, sticker.encryptUrl, sticker.aesKey)
+      .then((result) => {
+        if (cancelled) return
+        if (result.success && result.localPath) {
+          stickerSrcCache.set(cacheKey, result.localPath)
+          setSrc(result.localPath)
+        } else {
+          setFailed(true)
+        }
+      })
+      .catch(() => { if (!cancelled) setFailed(true) })
+    return () => { cancelled = true }
+  }, [cacheKey, src, failed, sticker.cdnUrl, sticker.md5, sticker.productId, sticker.encryptUrl, sticker.aesKey])
+
+  if (!cacheKey || failed) {
+    return <div className="rounded-2xl rounded-tl-sm bg-surface px-3 py-2 text-sm text-muted">[表情]</div>
+  }
+  if (!src) {
+    return (
+      <div className="flex size-20 items-center justify-center rounded-2xl rounded-tl-sm bg-surface">
+        <Loader2 className="animate-spin text-muted" size={16} />
+      </div>
+    )
+  }
+  return <img alt="表情包" className="max-h-28 max-w-40 rounded-lg object-contain" draggable={false} src={src} />
 }
 
 /** 微信语音条的声波图标：加载时旋转提示，播放时切换成动态音量柱。 */
@@ -540,6 +598,9 @@ export default function PersonaChatPage() {
               <div className={`flex max-w-[78%] flex-col gap-1 ${isMine ? 'items-end' : 'items-start'}`}>
                 {bubbles.map((bubble, index) => {
                   const bubbleKey = `${message.id}:${index}`
+                  if (bubble.sticker) {
+                    return <PersonaStickerBubble key={bubbleKey} sticker={bubble.sticker} />
+                  }
                   if (bubble.isVoice && !isMine) {
                     const active = speakingKey === bubbleKey
                     const loading = active && speakingState?.phase === 'loading'
