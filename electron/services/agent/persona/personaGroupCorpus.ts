@@ -11,6 +11,8 @@
  */
 import type { ChatSearchMemoryMessage } from '../../search/chatSearchIndexService'
 import { BURST_JOINER, MSG_CHAR_CAP, PROFILE_CHUNK_CHARS, TURN_GAP_SECONDS, messageText } from './personaCorpus'
+import { collectStickers, mergeStickers } from './personaStickers'
+import type { PersonaSticker } from './personaTypes'
 
 const MAX_GROUPS = 8                 // 最多扫描的群数（按最近活跃排序取前 N）
 const PER_GROUP_INDEX_CAP = 1500     // 单个群最多索引的消息数（控制懒索引成本）
@@ -34,6 +36,8 @@ export interface PersonaGroupCorpus {
   friendMessageCount: number
   /** 实际取到发言的群数 */
   groupCount: number
+  /** TA 在群里发过的表情包统计（与私聊统计合并后入词典） */
+  stickers: PersonaSticker[]
 }
 
 /** TA 在群里的一轮连发 + 可选的上文（群友或「我」说的）。 */
@@ -161,12 +165,14 @@ export async function collectGroupCorpus(
   friendName: string,
   onProgress?: (detail: string) => void,
 ): Promise<PersonaGroupCorpus> {
-  const empty: PersonaGroupCorpus = { corpusText: '', profileChunks: [], friendMessageCount: 0, groupCount: 0 }
+  const empty: PersonaGroupCorpus = { corpusText: '', profileChunks: [], friendMessageCount: 0, groupCount: 0, stickers: [] }
   const groups = await findFriendGroups(friendWxid)
   if (groups.length === 0) return empty
 
   const { chatSearchIndexService } = await import('../../search/chatSearchIndexService')
+  const friendKey = normalizeId(friendWxid)
   const allSnippets: GroupSnippet[] = []
+  let stickers: PersonaSticker[] = []
   let friendMessageCount = 0
   let groupCount = 0
 
@@ -175,6 +181,10 @@ export async function collectGroupCorpus(
     try {
       onProgress?.(`正在读取群聊 ${groupCount + 1}（已收集 ${friendMessageCount} 条发言）`)
       const messages = await chatSearchIndexService.listSessionMemoryMessages(groupId, undefined, PER_GROUP_INDEX_CAP)
+      stickers = mergeStickers(
+        stickers,
+        collectStickers(messages, (m) => m.isSend !== 1 && normalizeId(m.senderUsername) === friendKey),
+      )
       const snippets = extractGroupSnippets(messages, friendWxid)
       if (snippets.length === 0) continue
       groupCount += 1
@@ -184,7 +194,7 @@ export async function collectGroupCorpus(
       /* 单个群索引/读取失败跳过 */
     }
   }
-  if (allSnippets.length === 0) return empty
+  if (allSnippets.length === 0) return { ...empty, stickers }
 
   allSnippets.sort((a, b) => a.startTime - b.startTime)
   return {
@@ -192,5 +202,6 @@ export async function collectGroupCorpus(
     profileChunks: renderGroupProfileChunks(allSnippets, friendName),
     friendMessageCount,
     groupCount,
+    stickers,
   }
 }

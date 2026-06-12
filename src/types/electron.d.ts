@@ -217,6 +217,15 @@ export interface PersonaRecordInfo {
     groupSessionCount?: number
   }
   profile: PersonaProfileInfo | null
+  stickers?: Array<{
+    md5: string
+    cdnUrl: string
+    productId?: string
+    encryptUrl?: string
+    aesKey?: string
+    count: number
+    contexts: string[]
+  }>
   corpusUntil: number
   modelProvider: string
   modelId: string
