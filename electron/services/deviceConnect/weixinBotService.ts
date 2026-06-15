@@ -35,7 +35,8 @@ const MODE_FILE = 'wechat-bot-modes.json'
 const QR_DEADLINE_MS = 5 * 60_000
 const TYPING_KEEPALIVE_MS = 5_000
 const PENDING_SELECTION_TTL_MS = 2 * 60_000
-const PERSONA_BUBBLE_SEND_DELAY_MS = 450
+const PERSONA_BUBBLE_SEND_PAUSE_MIN_MS = 700
+const PERSONA_BUBBLE_SEND_PAUSE_MAX_MS = 2200
 const PERSONA_PENDING_FLUSH_MIN_MS = 5_000
 const PERSONA_PENDING_FLUSH_MAX_MS = 10_000
 const PERSONA_PENDING_AFTER_BUSY_MS = 1_200
@@ -295,6 +296,11 @@ function splitVoiceMarkedReply(reply: WechatBotReply, forceVoice: boolean): Wech
 
 function normalizeWechatTextBubbles(bubbles: string[]): string[] {
   return bubbles.map((bubble) => bubble.trim()).filter(Boolean)
+}
+
+function personaBubbleSendPauseMs(index: number): number {
+  if (index <= 0) return 0
+  return Math.round(PERSONA_BUBBLE_SEND_PAUSE_MIN_MS + Math.random() * (PERSONA_BUBBLE_SEND_PAUSE_MAX_MS - PERSONA_BUBBLE_SEND_PAUSE_MIN_MS))
 }
 
 function splitWechatMarkedBubbles(text: string): string[] {
@@ -1146,7 +1152,8 @@ class WeixinBotService {
   private async sendTextBubbles(toUserId: string, bubbles: string[], contextToken?: string): Promise<void> {
     const normalized = normalizeWechatTextBubbles(bubbles)
     for (let i = 0; i < normalized.length; i += 1) {
-      if (i > 0) await this.sleep(PERSONA_BUBBLE_SEND_DELAY_MS)
+      const pauseMs = personaBubbleSendPauseMs(i)
+      if (pauseMs > 0) await this.sleep(pauseMs)
       const session = this.session
       if (!session) return
       await sendText(session, toUserId, normalized[i], contextToken)

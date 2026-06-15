@@ -85,7 +85,7 @@ export interface TtsSpeakOptions {
 
 export interface ImageGenConfig {
   enabled: boolean
-  protocol: 'openai-compatible' | 'openai' | 'google'
+  protocol: 'openai-compatible' | 'openai' | 'google' | 'custom'
   apiKey: string
   baseURL: string
   model: string

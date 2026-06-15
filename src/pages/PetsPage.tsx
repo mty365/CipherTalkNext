@@ -245,15 +245,15 @@ export default function PetsPage() {
         <Tabs selectedKey={tab} onSelectionChange={(key: Key) => setTab(key === 'installed' || key === 'interaction' ? key : 'gallery')}>
           <Tabs.ListContainer>
             <Tabs.List aria-label="宠物页签">
-              <Tabs.Tab id="gallery">
+              <Tabs.Tab className="min-w-max whitespace-nowrap" id="gallery">
                 宠物库
                 <Tabs.Indicator />
               </Tabs.Tab>
-              <Tabs.Tab className="whitespace-nowrap" id="installed">
+              <Tabs.Tab className="min-w-max whitespace-nowrap" id="installed">
                 已安装{installed.length > 0 ? `（${installed.length}）` : ''}
                 <Tabs.Indicator />
               </Tabs.Tab>
-              <Tabs.Tab id="interaction">
+              <Tabs.Tab className="min-w-max whitespace-nowrap" id="interaction">
                 互动
                 <Tabs.Indicator />
               </Tabs.Tab>

@@ -1,7 +1,8 @@
 /**
  * AI 作图服务 —— 独立的图像生成配置（AI 助手 generate_image 工具用），与聊天模型分开。
  * 配置存 ConfigService.imageGenConfig；openai/google 协议走 AI SDK generateImage，
- * openai-compatible 走直连 /images/generations + 宽容解析（国内厂商多返回 url 而非 b64_json）。
+ * openai-compatible 走 baseURL + /images/generations，custom 直接请求完整 URL。
+ * 直连接口使用 OpenAI 图片生成请求体 + 宽容解析（国内厂商多返回 url 而非 b64_json）。
  * 可在主进程与 AI 子进程复用（ConfigService 在两边都能解析路径）。
  */
 import fs from 'fs'
@@ -14,7 +15,7 @@ import { createProxyFetch, getResolvedProxyUrl } from './proxyFetch'
 
 export interface ImageGenConfig {
   enabled: boolean
-  protocol: 'openai-compatible' | 'openai' | 'google'
+  protocol: 'openai-compatible' | 'openai' | 'google' | 'custom'
   apiKey: string
   baseURL: string
   model: string
@@ -32,9 +33,9 @@ export interface ImageGenResult {
   error?: string
 }
 
-const DEFAULT_IMAGE_GEN_TIMEOUT_MS = 600000
+const DEFAULT_IMAGE_GEN_TIMEOUT_MS = 3_600_000
 const MIN_IMAGE_GEN_TIMEOUT_MS = 60000
-const MAX_IMAGE_GEN_TIMEOUT_MS = 1800000
+const MAX_IMAGE_GEN_TIMEOUT_MS = 3_600_000
 
 function normalizeImageGenTimeoutMs(value: unknown): number {
   const n = Math.floor(Number(value))
@@ -45,7 +46,7 @@ function normalizeImageGenTimeoutMs(value: unknown): number {
 function normalizeImageGenConfig(cfg: ImageGenConfig | Partial<ImageGenConfig>): ImageGenConfig {
   return {
     enabled: Boolean(cfg.enabled),
-    protocol: cfg.protocol === 'openai' || cfg.protocol === 'google' ? cfg.protocol : 'openai-compatible',
+    protocol: cfg.protocol === 'openai' || cfg.protocol === 'google' || cfg.protocol === 'custom' ? cfg.protocol : 'openai-compatible',
     apiKey: String(cfg.apiKey || ''),
     baseURL: String(cfg.baseURL || ''),
     model: String(cfg.model || ''),
@@ -137,9 +138,11 @@ async function generateViaAiSdk(prompt: string, cfg: ImageGenConfig, size?: stri
  * 不带 response_format（部分厂商会拒绝），响应同时兼容 data[].b64_json / data[].url / images[].url。
  */
 async function generateViaCompatible(prompt: string, cfg: ImageGenConfig, size?: string, signal?: AbortSignal): Promise<ImageGenResult> {
-  if (!cfg.baseURL) return { success: false, error: '未配置作图接口地址' }
+  if (!cfg.baseURL) return { success: false, error: cfg.protocol === 'custom' ? '未配置作图完整接口地址' : '未配置作图接口地址' }
   const fetchImpl = createProxyFetch(getResolvedProxyUrl()) || fetch
-  const endpoint = `${cfg.baseURL.trim().replace(/\/+$/, '')}/images/generations`
+  const endpoint = cfg.protocol === 'custom'
+    ? cfg.baseURL.trim()
+    : `${cfg.baseURL.trim().replace(/\/+$/, '')}/images/generations`
   const sizeValue = normalizeSize(size || cfg.size)
 
   const response = await fetchImpl(endpoint, {
@@ -200,7 +203,7 @@ export async function generateImageToFile(
   options.signal?.addEventListener('abort', () => controller.abort())
 
   try {
-    if (cfg.protocol === 'openai-compatible') {
+    if (cfg.protocol === 'openai-compatible' || cfg.protocol === 'custom') {
       return await generateViaCompatible(input, cfg, options.size, controller.signal)
     }
     return await generateViaAiSdk(input, cfg, options.size, controller.signal)

@@ -15,11 +15,12 @@ const DEFAULT_CFG: ImageGenConfig = {
   baseURL: 'https://api.siliconflow.cn/v1',
   model: 'Kwai-Kolors/Kolors',
   size: '1024x1024',
-  timeoutMs: 600000,
+  timeoutMs: 3_600_000,
 }
 
 const PROTOCOL_OPTIONS: Array<{ value: ImageGenConfig['protocol']; label: string; hint: string }> = [
   { value: 'openai-compatible', label: 'OpenAI 兼容', hint: '硅基流动、智谱等国内厂商的 /images/generations 接口' },
+  { value: 'custom', label: '自定义完整地址', hint: '直接请求填写的完整 URL，不自动拼接 /images/generations' },
   { value: 'openai', label: 'OpenAI 官方', hint: 'gpt-image-1 / dall-e-3，走官方协议' },
   { value: 'google', label: 'Google Gemini', hint: 'Imagen 系列模型' },
 ]
@@ -42,6 +43,7 @@ export default function ImageGenTab() {
   const patch = (p: Partial<ImageGenConfig>) => setCfg((c) => ({ ...c, ...p }))
   const protocolOption = PROTOCOL_OPTIONS.find((o) => o.value === cfg.protocol)
   const timeoutSeconds = Math.round((cfg.timeoutMs || DEFAULT_CFG.timeoutMs) / 1000)
+  const customEndpoint = cfg.protocol === 'custom'
 
   const handleTest = async () => {
     setTesting(true)
@@ -130,11 +132,15 @@ export default function ImageGenTab() {
         </TextField>
 
         <TextField fullWidth onChange={(v) => patch({ baseURL: v })} value={cfg.baseURL}>
-          <Label>接口地址</Label>
+          <Label>{customEndpoint ? '完整接口地址' : '接口地址'}</Label>
           <InputGroup fullWidth variant="secondary">
-            <InputGroup.Input placeholder="https://api.siliconflow.cn/v1" />
+            <InputGroup.Input placeholder={customEndpoint ? 'https://api.example.com/v1/images/generations' : 'https://api.siliconflow.cn/v1'} />
           </InputGroup>
-          <Description>OpenAI 官方/Google 可留空用默认地址；OpenAI 兼容厂商必填 /v1 地址。</Description>
+          <Description>
+            {customEndpoint
+              ? '自定义完整地址会直接请求此 URL；请求体仍使用 OpenAI 图片生成格式。'
+              : 'OpenAI 官方/Google 可留空用默认地址；OpenAI 兼容厂商必填 /v1 地址。'}
+          </Description>
         </TextField>
 
         <TextField fullWidth onChange={(v) => patch({ model: v })} value={cfg.model}>
@@ -156,7 +162,7 @@ export default function ImageGenTab() {
         <TextField
           fullWidth
           onChange={(v) => {
-            const seconds = Math.max(60, Math.min(1800, Math.floor(Number(v) || 600)))
+            const seconds = Math.max(60, Math.min(3600, Math.floor(Number(v) || 3600)))
             patch({ timeoutMs: seconds * 1000 })
           }}
           type="number"
@@ -164,10 +170,10 @@ export default function ImageGenTab() {
         >
           <Label>超时时间</Label>
           <InputGroup fullWidth variant="secondary">
-            <InputGroup.Input max="1800" min="60" step="30" type="number" />
+            <InputGroup.Input max="3600" min="60" step="30" type="number" />
             <InputGroup.Suffix>秒</InputGroup.Suffix>
           </InputGroup>
-          <Description>默认 600 秒（10 分钟），可设置 60 到 1800 秒；慢速作图模型建议保持 600 秒以上。</Description>
+          <Description>默认 3600 秒（1 小时），可设置 60 到 3600 秒；慢速作图模型建议保持默认值。</Description>
         </TextField>
 
         {status && (
