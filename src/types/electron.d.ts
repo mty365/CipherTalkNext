@@ -185,6 +185,31 @@ export interface CodeWorkspaceListFilesResult {
   error?: string
 }
 
+export type CodeWorkspaceBrowserDiagnosticKind =
+  | 'console'
+  | 'page-error'
+  | 'load-failed'
+  | 'render-process-gone'
+  | 'navigation'
+
+export interface CodeWorkspaceBrowserDiagnostic {
+  kind: CodeWorkspaceBrowserDiagnosticKind
+  level?: 'debug' | 'info' | 'warning' | 'error'
+  message: string
+  source?: string
+  line?: number
+  url?: string
+  at: number
+}
+
+export interface CodeWorkspaceBrowserDiagnosticsResult {
+  success: boolean
+  url?: string
+  diagnostics?: CodeWorkspaceBrowserDiagnostic[]
+  hasErrors?: boolean
+  error?: string
+}
+
 export interface SkillFileItem {
   path: string
   name: string

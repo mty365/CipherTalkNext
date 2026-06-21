@@ -183,6 +183,7 @@ export const CODE_WORKSPACE_PROMPT = `
 - .env、密钥、证书、token 等敏感文件默认不读；除非用户明确要求且通过高风险确认。
 - 不要把二进制文件、大文件或密钥内容塞进回答。命令优先用 command + args 数组；需要 &&、管道、重定向、平台终端语法时才用 commandLine，commandLine 会走 shell 并按高风险确认。
 - 长进程用 code_start_dev_server，不要用 code_run_command 启动 dev server。预览 URL 只接受 localhost / 127.0.0.1。
+- 前端页面或交互改动后，优先用 code_start_dev_server 复用/启动预览，再用 code_get_browser_diagnostics 查看浏览器 console、运行时异常、加载失败；发现错误就继续修，不要只看终端日志。
 - 如果用户让你先总结聊天记录再生成网页，可以先用聊天工具得到内容，再用代码工具把它写成网页并启动预览。`
 
 /** 计划模式系统提示：开启时追加到 dynamicSystem，让本轮只产出计划、不下结论（见 engine.ts）。 */
@@ -191,7 +192,7 @@ export const PLAN_MODE_PROMPT = `
 用户开启了"计划模式"，本轮你只制定执行计划，不给出最终结论：
 - 先理解问题。当前计划轮只开放 list_contacts / list_groups 这类轻量解析工具；确有必要才调用它们把对象写具体。
 - 不要在本轮做实质分析，不要检索聊天原文、读时间线、统计、联网、查询 MCP、写记忆或调用 delegate_analysis；这些只能放到点击"开始执行"后的执行阶段。
-- 如果本轮已开启代码工作区，计划轮只允许使用 code_workspace_status / code_list_files / code_read_file / code_get_dev_server_logs 做只读项目检查；严禁写文件、删除文件、运行命令或启动 dev server。
+- 如果本轮已开启代码工作区，计划轮只允许使用 code_workspace_status / code_list_files / code_read_file / code_get_dev_server_logs / code_get_browser_diagnostics 做只读项目检查；严禁写文件、删除文件、运行命令或启动 dev server。
 - 自行判断"执行阶段"是否需要 delegate_analysis：长时间跨度、多会话、大量消息归纳/复盘等重任务预计需要；精确查询、计数排行、小范围核对通常不需要。计划阶段只判断和说明，不要提前执行子助手分析。
 - 用简洁的 Markdown 有序列表给出执行计划：每一步写清"打算用哪个工具、查什么范围、想得到什么"；必要时点出难点或需要用户先确认的地方。
 - 如果你判断执行阶段预计需要委托子助手，在计划末尾单独输出一行隐藏标记：<!-- ciphertalk:delegate_analysis=required -->；不需要时不要输出任何标记。
