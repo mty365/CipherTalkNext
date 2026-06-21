@@ -2,7 +2,7 @@
  * AI Agent 对话页（Phase C）——使用 AI SDK 的 useChat + AI Elements 组件。
  * 数据：useChat 走 IpcChatTransport（IPC → AI 子进程 → 流式 UIMessageChunk）。
  */
-import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode, type UIEvent } from 'react'
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MutableRefObject, type ReactNode, type UIEvent } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { isToolUIPart, type ChatStatus, type UIMessage } from 'ai'
 import { AlertDialog, Button as HeroButton, ButtonGroup, Dropdown, Header, Input, Label, Modal, Separator, Surface, Switch, Table, TextField, Toolbar, Tooltip } from '@heroui/react'
@@ -33,6 +33,7 @@ import {
   PromptInputTextarea,
   PromptInputTools,
   type PromptInputMessage,
+  type PromptInputControllerProps,
   usePromptInputController,
 } from '@/components/ai-elements/prompt-input'
 import { ImagePreview, type ImagePreviewOriginRect } from '@/components/ImagePreview'
@@ -2539,6 +2540,71 @@ function MessageUsageStats({
   )
 }
 
+function UserMessageActions({
+  canRetry,
+  copied,
+  messageText,
+  retrying,
+  onCopy,
+  onEdit,
+  onRetry,
+}: {
+  canRetry: boolean
+  copied: boolean
+  messageText: string
+  retrying: boolean
+  onCopy: () => void
+  onEdit: () => void
+  onRetry: () => void
+}) {
+  if (!messageText) return null
+
+  return (
+    <div className="-mt-1 flex justify-end opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+      <MessageActions aria-label="用户消息操作" className="rounded-(--agent-radius,12px) bg-background/80 px-1 py-0.5 shadow-xs ring-1 ring-border/60 backdrop-blur">
+        <MessageAction
+          label="复制"
+          onClick={onCopy}
+          tooltip={copied ? '已复制' : '复制'}
+        >
+          {copied ? <CheckIcon className="size-3.5" /> : <Copy className="size-3.5" />}
+        </MessageAction>
+        <MessageAction
+          disabled={!canRetry || retrying}
+          label="重试"
+          onClick={onRetry}
+          tooltip="重试"
+        >
+          <RefreshCcw className={`size-3.5 ${retrying ? 'animate-spin' : ''}`} />
+        </MessageAction>
+        <MessageAction
+          disabled={retrying}
+          label="编辑"
+          onClick={onEdit}
+          tooltip="编辑"
+        >
+          <PenLine className="size-3.5" />
+        </MessageAction>
+      </MessageActions>
+    </div>
+  )
+}
+
+function PromptInputControllerBridge({
+  controllerRef,
+}: {
+  controllerRef: MutableRefObject<PromptInputControllerProps | null>
+}) {
+  const controller = usePromptInputController()
+  useEffect(() => {
+    controllerRef.current = controller
+    return () => {
+      if (controllerRef.current === controller) controllerRef.current = null
+    }
+  }, [controller, controllerRef])
+  return null
+}
+
 function UsageDetailsModal({
   data,
   modelInfoByKey,
@@ -3181,6 +3247,7 @@ export default function AgentPage() {
   const [usageDetailsModal, setUsageDetailsModal] = useState<AgentMessageMetadata | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const { speakingKey: speakingMessageId, speak: speakMessage, stop: stopSpeakingMessage } = useTtsSpeaker()
+  const promptInputControllerRef = useRef<PromptInputControllerProps | null>(null)
   const selectedPreset = useMemo(
     () => presets.find((preset) => preset.id === selectedPresetId) || null,
     [presets, selectedPresetId]
@@ -3352,6 +3419,15 @@ export default function AgentPage() {
     }, 1600)
   }, [])
 
+  const handleCopyUserMessage = useCallback(async (messageId: string, text: string) => {
+    if (!text || typeof navigator === 'undefined' || !navigator.clipboard?.writeText) return
+    await navigator.clipboard.writeText(text)
+    setCopiedMessageId(messageId)
+    window.setTimeout(() => {
+      setCopiedMessageId((current) => current === messageId ? null : current)
+    }, 1600)
+  }, [])
+
   const handleSpeakAssistantMessage = useCallback((messageId: string, text: string) => {
     if (!text) return
     void speakMessage(messageId, text)
@@ -3509,7 +3585,7 @@ export default function AgentPage() {
   const [recordPendingDelete, setRecordPendingDelete] = useState<AgentConversationRecord | null>(null)
   const [recordDeleting, setRecordDeleting] = useState(false)
   // Agent 运行状态 → 桌宠动作：跑→run，报错→failed，收尾→done(挥手 2.6s)。
-  const petAgentState = busy ? 'running' : agentNotice ? 'failed' : 'idle'
+  const petAgentState = busy ? 'running' : (agentNotice && !agentNotice.startsWith('状态：') ? 'failed' : 'idle')
   const petPrevBusyRef = useRef(false)
   useEffect(() => {
     if (petAgentState === 'idle' && petPrevBusyRef.current) {
@@ -4205,6 +4281,42 @@ export default function AgentPage() {
     void sendPromise
   }, [busy, messages, regenerate, selectedModelSupportsTools])
 
+  const handleRetryUserMessage = useCallback((messageIndex: number) => {
+    if (busy || !selectedModelSupportsTools) return
+    const userMessage = messages[messageIndex]
+    if (!userMessage || userMessage.role !== 'user') return
+
+    stopSpeakingMessage()
+    setAgentNotice('')
+    setAgentProgress([])
+    setAgentRunPending(true)
+    setSubAgentProgress([])
+    runIsPlanRef.current = planModeRef.current
+    submitScopeRef.current = activeScopeRef.current
+    const nextMessages = messages.slice(0, messageIndex + 1)
+    setMessages(nextMessages)
+    messagesRef.current = nextMessages
+
+    const sendPromise = Promise.resolve(regenerate({ messageId: userMessage.id })).finally(() => {
+      submitScopeRef.current = null
+      setAgentRunPending(false)
+    })
+    void sendPromise
+  }, [busy, messages, regenerate, selectedModelSupportsTools, setMessages, stopSpeakingMessage])
+
+  const handleEditUserMessage = useCallback((messageIndex: number, text: string) => {
+    if (busy) return
+    const userMessage = messages[messageIndex]
+    if (!userMessage || userMessage.role !== 'user') return
+    promptInputControllerRef.current?.textInput.setInput(text)
+    const nextMessages = messages.slice(0, messageIndex)
+    setMessages(nextMessages)
+    messagesRef.current = nextMessages
+    setAgentNotice('')
+    setAgentProgress([])
+    setSubAgentProgress([])
+  }, [busy, messages, setMessages])
+
   // 计划模式确认：关闭计划模式并让 Agent 按上一条计划开始执行（沿用当前会话 scope）
   const handleExecutePlan = useCallback(() => {
     if (busy || !selectedModelSupportsTools) return
@@ -4528,6 +4640,7 @@ export default function AgentPage() {
               const isReasoningStreaming = isLastMessage && status === 'streaming' && lastPart?.type === 'reasoning'
               const chainActive = isLastMessage && busy
               const assistantText = message.role === 'assistant' ? messageTextOf(message) : ''
+              const userMessageText = message.role === 'user' ? messageTextOf(message) : ''
               const assistantTextStreaming = message.role === 'assistant' && isLastMessage && status === 'streaming'
               // 计划模式生成的消息：正文(执行计划)走 PlanCard 折叠卡片，不再走普通 Markdown 渲染。
               // 完成后看 metadata.planMode；流式期间 metadata 还没回来，靠在途标记 runIsPlanRef 判定。
@@ -4781,6 +4894,17 @@ export default function AgentPage() {
                       )}
                     </MessageContent>
                   )}
+                  {message.role === 'user' && (
+                    <UserMessageActions
+                      canRetry={selectedModelSupportsTools}
+                      copied={copiedMessageId === message.id}
+                      messageText={userMessageText}
+                      onCopy={() => { void handleCopyUserMessage(message.id, userMessageText) }}
+                      onEdit={() => handleEditUserMessage(messageIndex, userMessageText)}
+                      onRetry={() => handleRetryUserMessage(messageIndex)}
+                      retrying={busy}
+                    />
+                  )}
                 </Message>
               )
             })
@@ -4815,6 +4939,7 @@ export default function AgentPage() {
 
       <div className="shrink-0 pt-2 pb-1">
         <PromptInputProvider>
+          <PromptInputControllerBridge controllerRef={promptInputControllerRef} />
           <PromptInput
             accept="image/*,.txt,.md,.json,.csv,.pdf,application/pdf"
             className={`agent-prompt-input mx-auto mb-1 w-full min-w-80 max-w-[82%] **:data-[slot=input-group]:rounded-(--agent-radius,12px) **:data-[slot=input-group]:border-border **:data-[slot=input-group]:bg-surface **:data-[slot=input-group]:shadow-xs ${workspaceFileDragOver ? '**:data-[slot=input-group]:ring-2 **:data-[slot=input-group]:ring-primary/45' : ''}`}
