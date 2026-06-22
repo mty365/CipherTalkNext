@@ -1,73 +1,10 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import * as crypto from 'crypto'
 import { wxKeyService } from './wxKeyService'
 
-// Windows-only module: Mac 使用 wxKeyServiceMac.ts 的 Mach API 替代
-const IS_WIN = process.platform === 'win32'
-
-// Windows API 常量
-const PROCESS_ALL_ACCESS = 0x1F0FFF
-const MEM_COMMIT = 0x1000
-const MEM_PRIVATE = 0x20000
-const MEM_MAPPED = 0x40000
-const MEM_IMAGE = 0x1000000
-const PAGE_NOACCESS = 0x01
-const PAGE_GUARD = 0x100
-
-// 延迟初始化 Windows API
-let koffiModule: any = null
-let kernel32: any = null
-let OpenProcess: any = null
-let CloseHandle: any = null
-let VirtualQueryEx: any = null
-let ReadProcessMemory: any = null
-let MEMORY_BASIC_INFORMATION: any = null
-
-function ensureKernel32(): boolean {
-  if (!IS_WIN) return false
-  if (kernel32) return true
-  
-  try {
-    koffiModule = require('koffi')
-    kernel32 = koffiModule.load('kernel32.dll')
-
-    const HANDLE = koffiModule.pointer('HANDLE_IMG_KEY', koffiModule.opaque())
-    MEMORY_BASIC_INFORMATION = koffiModule.struct('MEMORY_BASIC_INFORMATION_IMG_KEY', {
-      BaseAddress: 'uint64',
-      AllocationBase: 'uint64',
-      AllocationProtect: 'uint32',
-      RegionSize: 'uint64',
-      State: 'uint32',
-      Protect: 'uint32',
-      Type: 'uint32'
-    })
-
-    OpenProcess = kernel32.func('OpenProcess', 'HANDLE_IMG_KEY', ['uint32', 'bool', 'uint32'])
-    CloseHandle = kernel32.func('CloseHandle', 'bool', ['HANDLE_IMG_KEY'])
-    VirtualQueryEx = kernel32.func('VirtualQueryEx', 'uint64', [
-      'HANDLE_IMG_KEY', 
-      'uint64', 
-      koffiModule.out(koffiModule.pointer(MEMORY_BASIC_INFORMATION)), 
-      'uint64'
-    ])
-    ReadProcessMemory = kernel32.func('ReadProcessMemory', 'bool', [
-      'HANDLE_IMG_KEY', 
-      'uint64', 
-      'void*', 
-      'uint64', 
-      koffiModule.out(koffiModule.pointer('uint64'))
-    ])
-
-    return true
-  } catch (e) {
-    console.error('初始化 kernel32 失败:', e)
-    return false
-  }
-}
-
 /**
- * 图片密钥服务 - 使用 WeFlow 的完整实现
+ * 图片密钥服务。
+ * Windows AES 密钥只通过 Rust native 内存扫描获取；macOS 走 wxKeyServiceMac。
  */
 class ImageKeyService {
   /**
@@ -184,210 +121,21 @@ class ImageKeyService {
   }
 
   /**
-   * 检查是否是有效的密钥字符（字母数字）
-   */
-  private isAlphaNumAscii(byte: number): boolean {
-    return (byte >= 0x61 && byte <= 0x7a) || // a-z
-           (byte >= 0x41 && byte <= 0x5a) || // A-Z
-           (byte >= 0x30 && byte <= 0x39)    // 0-9
-  }
-
-  /**
-   * 检查是否是 UTF-16 编码的 ASCII 密钥
-   */
-  private isUtf16AsciiKey(buf: Buffer, start: number): boolean {
-    if (start + 64 > buf.length) return false
-    for (let j = 0; j < 32; j++) {
-      const charByte = buf[start + j * 2]
-      const nullByte = buf[start + j * 2 + 1]
-      if (nullByte !== 0x00 || !this.isAlphaNumAscii(charByte)) {
-        return false
-      }
-    }
-    return true
-  }
-
-  /**
-   * 验证 AES 密钥
-   * 解密后应该是 JPEG 文件头: 0xFF 0xD8 0xFF
-   */
-  private verifyKey(ciphertext: Buffer, keyBytes: Buffer): boolean {
-    try {
-      const key = keyBytes.subarray(0, 16)
-      const decipher = crypto.createDecipheriv('aes-128-ecb', key, null)
-      decipher.setAutoPadding(false)
-      const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()])
-      const isValid = decrypted[0] === 0xFF && decrypted[1] === 0xD8 && decrypted[2] === 0xFF
-      if (isValid) {
-        console.log(`✓ 验证 AES 密钥成功: ${key.toString('ascii')}`)
-      }
-      return isValid
-    } catch {
-      return false
-    }
-  }
-
-  /**
-   * 获取进程的所有可读内存区域
-   */
-  private getMemoryRegions(hProcess: any): Array<[number, number]> {
-    const regions: Array<[number, number]> = []
-
-    let address = 0
-    const maxAddress = 0x7fffffffffff
-
-    while (address >= 0 && address < maxAddress) {
-      const info: any = {}
-      const result = VirtualQueryEx(hProcess, address, info, koffiModule.sizeof(MEMORY_BASIC_INFORMATION))
-      if (!result) break
-
-      const state = info.State
-      const protect = info.Protect
-      const type = info.Type
-      const regionSize = Number(info.RegionSize)
-
-      // 只扫描已提交的、可读的内存区域
-      if (state === MEM_COMMIT && 
-          (protect & PAGE_NOACCESS) === 0 && 
-          (protect & PAGE_GUARD) === 0) {
-        // 包括私有内存、映射内存和镜像内存
-        if (type === MEM_PRIVATE || type === MEM_MAPPED || type === MEM_IMAGE) {
-          regions.push([Number(info.BaseAddress), regionSize])
-        }
-      }
-
-      const nextAddress = address + regionSize
-      if (nextAddress <= address) break
-      address = nextAddress
-    }
-
-    return regions
-  }
-
-  /**
-   * 读取进程内存
-   */
-  private readProcessMemory(hProcess: any, address: number, size: number): Buffer | null {
-    const buffer = Buffer.alloc(size)
-    const bytesRead = [BigInt(0)]
-    const ok = ReadProcessMemory(hProcess, address, buffer, size, bytesRead)
-    if (!ok || bytesRead[0] === BigInt(0)) return null
-    return buffer.subarray(0, Number(bytesRead[0]))
-  }
-
-  /**
    * 从进程内存获取 AES 密钥
    */
-  private async getAesKeyFromMemory(pid: number, ciphertext: Buffer, onProgress?: (msg: string) => void): Promise<string | null> {
-    // 优先走 Rust DLL 内存扫描（更快、与数据库密钥同一套 Ed25519 鉴权）
+  private async getAesKeyFromMemory(ciphertext: Buffer, onProgress?: (msg: string) => void): Promise<string | null> {
     try {
+      onProgress?.('正在调用 Rust 内存扫描获取 AES 密钥...')
       const rustKey = wxKeyService.scanImageAesKey(ciphertext)
       if (rustKey) {
         onProgress?.('Rust 内存扫描命中 AES 密钥')
         return rustKey
       }
     } catch (e) {
-      console.error('Rust 图片密钥扫描异常，回退本地扫描:', e)
+      console.error('Rust 图片密钥扫描异常:', e)
     }
-    onProgress?.('Rust 扫描未命中，回退本地内存扫描...')
-
-    if (!ensureKernel32()) return null
-
-    const hProcess = OpenProcess(PROCESS_ALL_ACCESS, false, pid)
-    if (!hProcess) {
-      console.error('无法打开进程，PID:', pid)
-      return null
-    }
-
-    try {
-      const regions = this.getMemoryRegions(hProcess)
-      console.log(`找到 ${regions.length} 个内存区域`)
-      
-      const chunkSize = 4 * 1024 * 1024  // 4MB 分块
-      const overlap = 65  // 重叠字节数，避免边界问题
-      let scannedRegions = 0
-
-      for (const [baseAddress, regionSize] of regions) {
-        // 跳过过大的区域
-        if (regionSize > 100 * 1024 * 1024) continue
-
-        let offset = 0
-        let trailing: Buffer | null = null
-
-        while (offset < regionSize) {
-          const remaining = regionSize - offset
-          const currentChunkSize = remaining > chunkSize ? chunkSize : remaining
-          const chunk = this.readProcessMemory(hProcess, baseAddress + offset, currentChunkSize)
-
-          if (!chunk || !chunk.length) {
-            offset += currentChunkSize
-            trailing = null
-            continue
-          }
-
-          // 合并上一块的尾部数据
-          let dataToScan: Buffer
-          if (trailing && trailing.length) {
-            dataToScan = Buffer.concat([trailing, chunk])
-          } else {
-            dataToScan = chunk
-          }
-
-          // 搜索 ASCII 密钥：非字母数字 + 32个字母数字 + 非字母数字
-          for (let i = 0; i < dataToScan.length - 34; i++) {
-            if (this.isAlphaNumAscii(dataToScan[i])) continue
-
-            let valid = true
-            for (let j = 1; j <= 32; j++) {
-              if (!this.isAlphaNumAscii(dataToScan[i + j])) {
-                valid = false
-                break
-              }
-            }
-
-            if (valid && this.isAlphaNumAscii(dataToScan[i + 33])) {
-              valid = false
-            }
-
-            if (valid) {
-              const keyBytes = dataToScan.subarray(i + 1, i + 33)
-              if (this.verifyKey(ciphertext, keyBytes)) {
-                return keyBytes.toString('ascii')
-              }
-            }
-          }
-
-          // 搜索 UTF-16 密钥
-          for (let i = 0; i < dataToScan.length - 65; i++) {
-            if (!this.isUtf16AsciiKey(dataToScan, i)) continue
-
-            const keyBytes = Buffer.alloc(32)
-            for (let j = 0; j < 32; j++) {
-              keyBytes[j] = dataToScan[i + j * 2]
-            }
-            if (this.verifyKey(ciphertext, keyBytes)) {
-              return keyBytes.toString('ascii')
-            }
-          }
-
-          // 保留尾部数据用于下一块
-          const start = dataToScan.length - overlap
-          trailing = dataToScan.subarray(start < 0 ? 0 : start)
-          offset += currentChunkSize
-        }
-
-        scannedRegions++
-        if (scannedRegions % 50 === 0) {
-          onProgress?.(`正在扫描内存区域: ${scannedRegions}/${regions.length}`)
-        }
-      }
-
-      return null
-    } finally {
-      try {
-        CloseHandle(hProcess)
-      } catch { }
-    }
+    onProgress?.('Rust 内存扫描未命中 AES 密钥')
+    return null
   }
 
   /**
@@ -395,7 +143,6 @@ class ImageKeyService {
    */
   async getImageKeys(
     userDir: string,
-    wechatPid: number,
     onProgress?: (msg: string) => void
   ): Promise<{ success: boolean; xorKey?: number; aesKey?: string; error?: string }> {
     try {
@@ -431,7 +178,7 @@ class ImageKeyService {
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         onProgress?.(`正在扫描微信进程内存获取 AES 密钥... (第 ${attempt}/${maxRetries} 次)`)
 
-        const aesKey = await this.getAesKeyFromMemory(wechatPid, ciphertext, onProgress)
+        const aesKey = await this.getAesKeyFromMemory(ciphertext, onProgress)
         if (aesKey) {
           return {
             success: true,

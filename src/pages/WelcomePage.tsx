@@ -754,7 +754,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
             图片密钥用于解密微信图片，可自动获取，也可以稍后手动填写。
           </Typography.Paragraph>
           {renderInfoList([
-            '优先通过本地缓存目录和 kvcomm 码推导',
+            isMac ? '优先通过 kvcomm 码和模板文件推导' : '通过 Rust native 扫描微信进程内存',
             isMac ? 'kvcomm 失败时再回退到进程内存扫描' : '请先在电脑微信中打开几张图片',
             '此步骤可跳过'
           ])}
@@ -801,7 +801,7 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         description: isMac ? '请选择微信版本目录或账号根目录。' : '请选择微信-设置-存储位置对应的目录。'
       })}
       <div className="flex flex-wrap items-center gap-2.5">
-        <Button className="min-w-[132px] justify-center" type="button" variant="primary" onPress={() => void handleAutoDetectPath()} isPending={isDetectingPath}>
+        <Button className="min-w-33 justify-center" type="button" variant="primary" onPress={() => void handleAutoDetectPath()} isPending={isDetectingPath}>
           <span className="grid size-4 shrink-0 place-items-center">
             {isDetectingPath ? <Spinner size="sm" color="current" /> : <Wand2 size={16} />}
           </span>
@@ -1006,8 +1006,8 @@ function WelcomePage({ standalone = false }: WelcomePageProps) {
         {isFetchingImageKey ? '获取中' : '自动获取图片密钥'}
       </Button>
       {imageKeyStatus && renderStatusAlert(imageKeyStatus, 'default')}
-      {isFetchingImageKey && renderStatusAlert(isMac ? '正在尝试 kvcomm / 内存扫描，请稍候。' : '正在扫描内存，请稍候。', 'accent')}
-      <Description>{isMac ? '优先从 kvcomm 和模板文件推导，失败后回退到内存扫描。' : '如获取失败，请先在电脑微信中打开查看几张图片后重试。'}</Description>
+      {isFetchingImageKey && renderStatusAlert(isMac ? '正在尝试 kvcomm / 内存扫描，请稍候。' : '正在通过 Rust native 扫描微信内存，请稍候。', 'accent')}
+      <Description>{isMac ? '优先从 kvcomm 和模板文件推导，失败后回退到内存扫描。' : 'Windows 使用 Rust native 内存扫描；如获取失败，请先在电脑微信中打开查看几张图片后重试。'}</Description>
     </div>
   )
 

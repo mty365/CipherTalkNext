@@ -1,5 +1,4 @@
 import { systemPreferences } from 'electron'
-import { windowsHelloService } from './windowsHelloService'
 
 export type SystemAuthStatus = {
   platform: NodeJS.Platform
@@ -18,13 +17,12 @@ export type SystemAuthVerifyResult = {
 class SystemAuthService {
   getStatus(): SystemAuthStatus {
     if (process.platform === 'win32') {
-      const available = windowsHelloService.isAvailable()
       return {
         platform: process.platform,
-        available,
-        method: available ? 'windows-hello' : 'none',
+        available: false,
+        method: 'none',
         displayName: 'Windows Hello',
-        error: available ? undefined : '当前设备未启用 Windows Hello'
+        error: 'Windows Hello 将通过 WebAuthn 兼容模式启用'
       }
     }
 
@@ -56,15 +54,6 @@ class SystemAuthService {
         success: false,
         method: status.method,
         error: status.error || '当前设备不可用'
-      }
-    }
-
-    if (process.platform === 'win32') {
-      const result = windowsHelloService.verify(reason || '请验证您的身份')
-      return {
-        success: result.success,
-        method: 'windows-hello',
-        error: result.error
       }
     }
 

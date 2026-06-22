@@ -1,7 +1,7 @@
 import { spawn, execSync } from 'child_process'
 import { join } from 'path'
 import { app } from 'electron'
-import { existsSync, copyFileSync, readdirSync, unlinkSync, statSync } from 'fs'
+import { existsSync, readdirSync, statSync } from 'fs'
 import * as crypto from 'crypto'
 
 /** 内存扫描诊断结果 */
@@ -17,21 +17,6 @@ export interface WxScanDiag {
 }
 
 export class WxKeyService {
-  private lib: any = null
-
-  /**
-   * 获取 DLL 路径
-   */
-  getDllPath(): string {
-    // 开发环境: dist-electron/ -> resources/
-    // 打包环境: resources/resources/
-    const resourcesPath = app.isPackaged
-      ? join(process.resourcesPath, 'resources')
-      : join(app.getAppPath(), 'resources')
-
-    return join(resourcesPath, 'wx_key.dll')
-  }
-
   /**
    * 检查微信进程是否运行 (仅微信4.x Weixin.exe)
    */
@@ -191,30 +176,6 @@ export class WxKeyService {
     return false
   }
 
-  /**
-   * 初始化 DLL (使用 koffi)
-   */
-  async initialize(): Promise<boolean> {
-    try {
-      const koffi = require('koffi')
-      const dllPath = this.getDllPath()
-
-      console.log('加载 DLL:', dllPath)
-
-      if (!existsSync(dllPath)) {
-        console.error('DLL 文件不存在:', dllPath)
-        return false
-      }
-
-      this.lib = koffi.load(dllPath)
-
-      return true
-    } catch (e) {
-      console.error('初始化 DLL 失败:', e)
-      return false
-    }
-  }
-
   // ===== Windows 内存扫描方案（Rust DLL wechat_key_tool.dll，Ed25519 强验证） =====
 
   private scanLib: any = null
@@ -330,47 +291,9 @@ export class WxKeyService {
     }
   }
 
-  /**
-   * 释放资源（数据库密钥已改为内存扫描，不再有 Hook 需要卸载）
-   */
+  /** 释放 Rust 扫描库引用。 */
   dispose(): void {
-    this.lib = null
-  }
-
-  /**
-   * 获取图片解密密钥（通过 DLL 本地文件扫描，秒级返回，无需微信进程运行）
-   * 从 kvcomm 缓存目录的 statistic 文件中提取唯一码，计算 XOR 和 AES 密钥
-   */
-  getImageKey(): { success: boolean; json?: string; error?: string } {
-    if (!this.lib) {
-      return { success: false, error: 'DLL 未加载' }
-    }
-
-    try {
-      const koffi = require('koffi')
-      const GetImageKeyFn = this.lib.func('bool GetImageKey(_Out_ char *resultBuffer, int bufferSize)')
-      const GetLastErrorMsgFn = this.lib.func('const char* GetLastErrorMsg()')
-
-      const resultBuffer = Buffer.alloc(8192)
-      const ok = GetImageKeyFn(resultBuffer, resultBuffer.length)
-
-      if (!ok) {
-        let errMsg = '获取图片密钥失败'
-        try {
-          const errPtr = GetLastErrorMsgFn()
-          if (errPtr) {
-            errMsg = typeof errPtr === 'string' ? errPtr : koffi.decode(errPtr, 'char', -1)
-          }
-        } catch { }
-        return { success: false, error: errMsg }
-      }
-
-      const nullIdx = resultBuffer.indexOf(0)
-      const json = resultBuffer.toString('utf8', 0, nullIdx > -1 ? nullIdx : undefined).trim()
-      return { success: true, json }
-    } catch (e) {
-      return { success: false, error: String(e) }
-    }
+    this.scanLib = null
   }
 
   /**
