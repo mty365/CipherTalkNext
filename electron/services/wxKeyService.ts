@@ -2,6 +2,7 @@ import { spawn, execSync } from 'child_process'
 import { join } from 'path'
 import { app } from 'electron'
 import { existsSync, copyFileSync, readdirSync, unlinkSync, statSync } from 'fs'
+import * as crypto from 'crypto'
 
 export class WxKeyService {
   private lib: any = null
@@ -202,6 +203,75 @@ export class WxKeyService {
     } catch (e) {
       console.error('初始化 DLL 失败:', e)
       return false
+    }
+  }
+
+  // ===== Windows 内存扫描方案（Rust DLL wechat_key_tool.dll，Ed25519 强验证） =====
+
+  private scanLib: any = null
+
+  /** 内存扫描 DLL 路径 */
+  getScanDllPath(): string {
+    const resourcesPath = app.isPackaged
+      ? join(process.resourcesPath, 'resources')
+      : join(app.getAppPath(), 'resources')
+    return join(resourcesPath, 'wechat_key_tool.dll')
+  }
+
+  /** 加载内存扫描 DLL */
+  initScanLib(): boolean {
+    if (this.scanLib) return true
+    try {
+      const koffi = require('koffi')
+      const dllPath = this.getScanDllPath()
+      if (!existsSync(dllPath)) {
+        console.error('内存扫描 DLL 不存在:', dllPath)
+        return false
+      }
+      this.scanLib = koffi.load(dllPath)
+      return true
+    } catch (e) {
+      console.error('加载内存扫描 DLL 失败:', e)
+      return false
+    }
+  }
+
+  /** 还原内嵌私钥（XOR 混淆，配对 DLL 内嵌公钥） */
+  private getScanPrivateKey(): crypto.KeyObject {
+    const obf = '6a74585b5a6a5f5c59713f2a5e785e7a168e0e9425838c437f0b1274d114f59457f436c936b80178da1848856b58eef3'
+    const der = Buffer.from(Buffer.from(obf, 'hex').map(v => v ^ 0x5a))
+    return crypto.createPrivateKey({ key: der, format: 'der', type: 'pkcs8' })
+  }
+
+  /**
+   * 内存扫描获取数据库密钥（Ed25519 挑战-应答鉴权）。
+   * 流程：取挑战 → 私钥签名 → 验签通过后 DLL 扫描 crypt_key 邻域。
+   * @param contactDbPath contact.db 完整路径（决定校验用的 salt）
+   * @returns 64 位十六进制密钥，或 null
+   */
+  scanDbKey(contactDbPath: string): string | null {
+    if (!this.initScanLib()) return null
+    try {
+      const koffi = require('koffi')
+      const wktChallenge = this.scanLib.func('int wkt_challenge(uint8_t*, size_t)')
+      const wktScanAuth = this.scanLib.func('void* wkt_scan_key_auth(uint8_t*, size_t, str)')
+      const wktFree = this.scanLib.func('void wkt_free(void*)')
+
+      const nonce = Buffer.alloc(32)
+      if (wktChallenge(nonce, 32) !== 32) return null
+
+      const sig = crypto.sign(null, nonce, this.getScanPrivateKey()) // Ed25519，64 字节
+      const ptr = wktScanAuth(sig, sig.length, contactDbPath)
+      if (!ptr) return null
+
+      const key = koffi.decode(ptr, 'char', -1)
+      wktFree(ptr)
+
+      const trimmed = String(key || '').replace(/\0/g, '').trim()
+      return trimmed.length === 64 ? trimmed : null
+    } catch (e) {
+      console.error('内存扫描获取密钥失败:', e)
+      return null
     }
   }
 
